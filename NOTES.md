@@ -1086,6 +1086,131 @@ match. **`wikipedia_en_top` is 0.3 GB for 875,265 articles** — versus 124 GB f
 The trigger is the existing failure signal: zero local hits, or a grounding rejection.
 No new detection logic.
 
+## F41 — [WARN] local file reading is not measurable yet, and not shippable
+
+`tny "summarize src/main.rs"` sits in the CLI surface with nothing behind it. A 59 KB
+source file is ~16k tokens against an 8192 context, so excerpt selection is mandatory.
+Code has no `<h2>` headings, so F31's section split does not apply.
+
+**Selection is solid and deterministic** — four ways to fit a file into 1,800 chars,
+scored model-free on whether the answer is present at all:
+
+| Excerpt strategy | Answer present |
+|---|---|
+| first 1,800 chars | 3/6 |
+| one term-centred window | 5/6 |
+| 3 term-scored fixed chunks | **6/6** |
+| 3 term-scored structural chunks | **6/6** |
+
+**Answering is not.** Three runs, and the numbers do not support any conclusion:
+
+| Run | Arm | Excerpt | Score | Latency |
+|---|---|---|---|---|
+| 1 | 3 fixed chunks | 1.8 KB | 3/6 | 19.9 s |
+| 2 | 3 structural chunks | 3.6 KB | 5/6 | 38.5 s |
+| 3 | 3 fixed chunks | 1.8 KB | **5/6** | 19.6 s |
+
+Runs 1 and 3 are the **same arm at the same budget** and differ by two cases. So the
+"structural chunking fixed it" reading from run 2 is unsupported — variance dominates a
+6-case fixture, exactly as it did in F27 (three runs of "0 false rejects" while broken)
+and F33. Nothing here ranks the chunkers.
+
+**A needle was satisfied by garbage.** For "what does the ungrounded function reject",
+`/command|restat|question/i` matched:
+
+> "The ungrounded function rejects command, restat, and question questions."
+
+That is an echo of the needle's own alternatives, scored as correct. The fixture's
+expectations are as broken as the ones F35 exposed for `/ntp/i`.
+
+**Verdict: cut local file reading from the shipping surface** until it has a fixture
+worth trusting — 15+ cases, expectations that a regurgitation cannot satisfy, and
+repeated runs. It is the only capability in `PLAN.md` whose promise rests on no
+evidence, and the honest options are to prove it or not to claim it.
+
+Costs worth keeping: ~20 s per answer at a 1.8 KB excerpt, ~38 s at 3.6 KB — prefill
+scales with the excerpt and dominates, so excerpt size is the latency dial.
+
+## Benchmark hygiene — learned the hard way this session
+
+- **One model server at a time.** Two `llama-server -t 4` processes on a 4-core box put
+  load average over 8 and made the machine unusable. Threads must not exceed cores in
+  aggregate.
+- **Idle servers are free.** Measured over 10 s with no requests: **0 %** of one core for
+  both the chat and embedding servers. A resident daemon costs RSS, not CPU.
+- **`ps %CPU` is a lifetime average, not instantaneous.** It reported 79 % and 38 % for
+  idle servers and nearly went into these notes as "llama-server busy-spins when idle".
+  Use `/proc/<pid>/stat` deltas.
+- **Spend model calls only where they are the measurement.** Selection is deterministic
+  and free: score every arm model-free, then run the model on the winner. That turned
+  F41 from 18 calls into 6.
+
+## F42 — piped input works, and it is the best non-ZIM path measured
+
+`tny "what is wrong" < paste.txt`. Structurally easier than F41: a paste averages
+**288 chars**, so it is sent whole — no chunking, no boundaries, no selection — and the
+paste itself is the grounding reference, so F27 applies unchanged.
+
+Six real tool outputs (rustc E0502, `systemctl`+`journalctl`, ssh host-key warning,
+vitest assertion, `df -h`, `docker ps` restart loop):
+
+| Metric | Result |
+|---|---|
+| top-level cause correct | **5/6** |
+| latency | **10.9 s per answer** |
+| F27 false rejects | **0/5** |
+
+Faster than every other path because prefill scales with input and a paste is tiny.
+
+**The one miss is a knowledge gap, not a context gap.** For a container `Restarting
+(137)` with `Killed` in the log, it blamed the `connection refused` line and missed that
+**137 means the kernel OOM-killed it**. Both "137" and "Killed" were in the context, so
+this is the case retrieval should fix — the natural next test is whether a docker/Arch
+lookup rescues it.
+
+**Caveat, and it is the recurring one:** 2 of the 5 passes contain invented specifics.
+The borrow-checker answer claimed `v` was "declared as a mutable reference (`&mut v`) in
+the loop" — there is no loop and no `&mut v` — and the `df` answer said "consuming 220GB
+out of its 209GB available space", inverting the columns. Both satisfied their needle by
+naming the right cause. This is the same shape as the earliest finding in these notes:
+**the headline fact is right and the elaboration is fabricated.** The terse contract
+(≤160 tokens, two sentences) is already in place and does not stop it.
+
+Untested mitigation: one sentence for pastes instead of two.
+
+## F43 — Q4_K_M rejected: quantisation changes the *shape* of the errors
+
+Halving the weights was meant to be a free RAM win. Same fixtures, Q8_0 versus Q4_K_M:
+
+| Metric | Q8_0 | Q4_K_M |
+|---|---|---|
+| answering, context present | 6/6 | **6/6** |
+| refusal, model alone | 4/6 | 4/6 |
+| **refusal + F27 grounding check** | **6/6** | **4/6** |
+| corpus lift | 3/6 → 6/6 | 2/6 → 6/6 |
+| on disk | ~800 MB | **508 MB** |
+
+Accuracy with context is identical, and disk drops 37 % (not the half I assumed). The
+reason to reject it is the **safety net degrading**: F27 recovers Q8_0 from 4/6 to 6/6
+but Q4_K_M only from 4/6 to 4/6.
+
+Q4_K_M's fabrications take an *uncatchable form*. Asked about disk space with a
+mismatched reference, it answered:
+
+> "To check disk space usage, open your file explanations or command prompt and navigate
+> to the C…"
+
+Windows-flavoured prose with **no command token in it**, so the command rule cannot fire
+— the same blind spot F38 found for comparative claims. Q8_0's failures were wrong
+*commands*, which the check catches every time.
+
+**A deterministic checker is only as good as the failure shape it was designed against,
+and quantisation changes that shape.** Any future quant swap must re-run `refuse`, not
+just `answers` — accuracy parity hid a real safety regression.
+
+Latency is not a factor either way: 17.4 s here versus 10.9–20 s for Q8_0 across runs,
+which is machine load, not the quant.
+
 ## Open questions
 
 - [x] ~~**Is 0.8B the floor?**~~ **Yes, on this fixture.** The Qwen3.5 dense ladder is
@@ -1097,9 +1222,12 @@ No new detection logic.
       for both models, so it cannot guide further model choice. Needed: multi-fact
       synthesis, exact-flag questions, and cases whose answer is genuinely absent
       from the corpus. Until then any "bigger model is better" claim is unmeasurable.
-- [ ] Still untested cheap wins: Qwen3.5-0.8B at **Q4_K_M** (halves RAM — does 6/6
-      survive?), and LFM2.5-350M *fine-tuned* for this one extraction task, the only
-      path back to a ~360 MB answerer.
+- [x] ~~Qwen3.5-0.8B at **Q4_K_M** (halves RAM — does 6/6 survive?)~~ **Rejected**
+      (F43). Answering survives at 6/6 and disk drops to 508 MB, but F27's refusal
+      recovery collapses from 6/6 to 4/6 because Q4_K_M fabricates commandless prose
+      the check cannot see. Accuracy parity hid a safety regression.
+- [ ] LFM2.5-350M *fine-tuned* for this one extraction task — still the only path back
+      to a ~360 MB answerer.
 - [x] ~~Would a purpose-built embedder beat bge-small?~~ **No** — nomic-embed-text
       v1.5 (137 M) scored *worse* on articles (F24). Embedder scaling is not the
       lever; `TNY_EMBED`/`TNY_QP`/`TNY_DP` make re-testing cheap if that changes.
@@ -1123,14 +1251,20 @@ No new detection logic.
 
 `bun bench/harness.mjs all` with the three servers up. Individual benchmarks:
 `rank` (F17/F31), `judge` (F16), `sections` (F22), `answers` (F20), `corpus` (F21),
-`refuse` (F26/F27), `select` (F31), `cross` (F34), `followup` (F28), `rewrite` (F29),
-`depth` (F30), `thinking` (F19), and `ground` — the F27/F32 self-test, which is pure:
-no servers, no network, exits non-zero on failure. Every helper is exported and the CLI
-only dispatches under `import.meta.main`, so `await import("./bench/harness.mjs")`
+`refuse` (F26/F27), `select` (F31), `cross` (F34), `rerank`/`widen` (F39), `file` (F41),
+`stdin` (F42), `followup` (F28), `rewrite` (F29), `depth` (F30), `synth` (F36),
+`clarify` (F37), `thinking` (F19), and `ground` — the F27/F32/F38 self-test, which is
+pure: no servers, no network, exits non-zero on failure. Every helper is exported and
+the CLI only dispatches under `import.meta.main`, so `await import("./bench/harness.mjs")`
 gives `ungrounded`, `pickSections`, `pickSectionsLex`, `rankArticles`, `search`,
-`searchAll`, `article`, `ask`, `embed`, `prep`, `terms`, `lexScore` and `window` for
-ad-hoc probing without rebuilding anything.
+`searchAll`, `article`, `ask`, `embed`, `prep`, `terms`, `lexScore`, `window`,
+`splitCompare`, `needsClarify`, `fileWindows` and `structChunks` for ad-hoc probing
+without rebuilding anything.
 
-Model swap: point `llama-server` at another GGUF on port 8080 and re-run — the
-harness is model-agnostic. Embedder swap: `TNY_EMBED`, `TNY_QP`, `TNY_DP`.
-Always pass `--no-mmproj` (F25).
+Model swap: point `llama-server` at another GGUF on port 8080 and re-run — the harness
+is model-agnostic. **Re-run `refuse`, not just `answers`**: Q4_K_M matched Q8_0 on
+answering while silently halving what the grounding check could catch (F43).
+Embedder swap: `TNY_EMBED`, `TNY_QP`, `TNY_DP`. Always pass `--no-mmproj` (F25).
+
+One model server at a time — two at `-t 4` on a 4-core box makes the machine unusable
+(see Benchmark hygiene).

@@ -12,7 +12,7 @@ A fully offline terminal search engine with a small model as the front end.
 tny "how do I set the system timezone"      # Arch Wiki ZIM
 tny "what does Vec::with_capacity do"       # DevDocs ZIM, anchor-sliced
 tny "how many neurons does C. elegans have" # Wikipedia ZIM
-tny "summarize src/main.rs"                 # local file
+tny "what is wrong" < paste.txt              # piped tool output, 5/6 (F42)
 tny -d "explain what a mutex is"            # no lookup
 tny "ext4 or btrfs"                         # comparison -> asks which side you mean
 tny --corpus list|add <name>|rm <name>      # manage ZIMs
@@ -225,6 +225,13 @@ Three regression tests earn their place:
 
 ## Deliberately not built
 
+- **Local file reading** — was in the CLI surface; **cut** (F41). Excerpt selection works
+  (6/6 answer present), but answering scored 3/6 then 5/6 on the *same arm at the same
+  budget*, so nothing is established, and one "pass" was an answer echoing the needle's
+  own words. Needs 15+ cases with expectations a regurgitation cannot satisfy before it
+  is claimed again.
+- **Two-article synthesis** — 2–3/5, and given one side only it invents the other
+  (F36). Comparisons take the ask-the-user path instead (F37).
 - **Model-as-judge** — at 350M it emits a near-constant index; at 0.8B it ties free
   rank-1 (4,4,5 vs 4/6) while mostly reproducing it, loses to RRF's 9/10, and costs a
   full model call to do so (F16). Not worth its latency, whatever its score.

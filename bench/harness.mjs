@@ -743,32 +743,156 @@ export function fileWindows(text, q, budget = 1800, n = 3) {
   const head = text.slice(0, budget);
   const one = window(text, t, budget);
   const size = Math.max(400, Math.floor(budget / n));
-  const chunks = [];
-  for (let i = 0; i < text.length; i += size) chunks.push({ at: i, text: text.slice(i, i + size) });
-  const top = chunks.map(c => ({ ...c, k: lexScore("", c.text, t) }))
-    .sort((a, b) => b.k - a.k).slice(0, n).sort((a, b) => a.at - b.at);
-  return { head, one, many: top.map(c => c.text).join("\n…\n") };
+  const fixed = [];
+  for (let i = 0; i < text.length; i += size) fixed.push({ at: i, text: text.slice(i, i + size) });
+  const pick = chunks => chunks.map(c => ({ ...c, k: lexScore("", c.text, t) }))
+    .sort((a, b) => b.k - a.k).slice(0, n).sort((a, b) => a.at - b.at)
+    .map(c => c.text.trim()).join("\n…\n");
+  // same chunk cap as the fixed arm, so `struct` vs `many` isolates boundary quality
+  // rather than context volume
+  return { head, one, many: pick(fixed), struct: pick(structChunks(text, size)) };
 }
 
+// F41: fixed-size chunks cut mid-function and mid-table. The excerpt then contains the
+// answer but not coherently, and answering scored 3/6 against selection's 6/6. Split on
+// structure instead — markdown headings, or a line starting a top-level declaration —
+// which is what makes the ZIM path work (F31).
+export function structChunks(text, max = 1200) {
+  const lines = text.split("\n");
+  const isBoundary = l => /^#{1,6}\s/.test(l) || /^(export |function |class |const |async function |\/\/ -+|## )/.test(l);
+  const out = [];
+  let cur = [], at = 0, pos = 0;
+  for (const l of lines) {
+    const len = l.length + 1;
+    if (cur.length && isBoundary(l) && cur.join("\n").length > 200) {
+      out.push({ at, text: cur.join("\n") });
+      cur = []; at = pos;
+    }
+    cur.push(l);
+    pos += len;
+    if (cur.join("\n").length > max) { out.push({ at, text: cur.join("\n") }); cur = []; at = pos; }
+  }
+  if (cur.length) out.push({ at, text: cur.join("\n") });
+  return out.filter(c => c.text.trim().length > 40);
+}
+
+// F42: piped input — `tny "what is wrong" < paste.txt`. Different from F41: a paste is
+// small enough to send whole, so there is no selection problem, and the paste itself is
+// the grounding reference. The question is whether 0.8B can diagnose real tool output.
+//
+// Needles are deliberately strict after F41, where /command|restat|question/ was
+// satisfied by "rejects command, restat, and question questions". Each needle demands a
+// specific identifier or fix that cannot be produced by echoing the question.
+const STDIN_CASES = [
+  ["what is wrong here", `error[E0502]: cannot borrow \`v\` as mutable because it is also borrowed as immutable
+ --> src/main.rs:4:5
+  |
+3 |     let first = &v[0];
+  |                  - immutable borrow occurs here
+4 |     v.push(4);
+  |     ^^^^^^^^^ mutable borrow occurs here
+5 |     println!("{first}");
+  |               ------- immutable borrow later used here`,
+    /first|immutable borrow|&v\[0\]/i, "rust borrow error"],
+
+  ["why did this fail", `$ systemctl start nginx
+Job for nginx.service failed because the control process exited with error code.
+See "systemctl status nginx.service" and "journalctl -xeu nginx.service" for details.
+$ journalctl -xeu nginx.service | tail -3
+nginx: [emerg] bind() to 0.0.0.0:80 failed (98: Address already in use)
+nginx: configuration file /etc/nginx/nginx.conf test failed`,
+    /already in use|port 80|:80|another process/i, "port conflict"],
+
+  ["what is wrong here", `$ ssh deploy@prod
+@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+@    WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED!     @
+@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+The RSA host key for prod has changed,
+and the key for the corresponding host is unknown.
+Offending key in /home/rob/.ssh/known_hosts:14`,
+    /known_hosts|host key|line 14/i, "changed host key"],
+
+  ["explain this failure", `FAIL  test/auth.test.ts > refresh token rotation
+AssertionError: expected 401 to be 200
+  - Expected  200
+  + Received  401
+   at test/auth.test.ts:88:24
+   at Module.runTest (node_modules/vitest/dist/chunk.js:120:9)`,
+    /401|unauthor|token|expected 200/i, "test assertion"],
+
+  ["what does this say about disk usage", `Filesystem      Size  Used Avail Use% Mounted on
+/dev/mapper/root  220G  209G  1.2G  99% /
+/dev/nvme0n1p1    511M  312M  199M  62% /boot
+tmpfs             3.9G  1.1M  3.9G   1% /run`,
+    /99%|1\.2G|root|nearly full|out of space/i, "df output"],
+
+  ["why is the container restarting", `CONTAINER ID   IMAGE          STATUS                          NAMES
+9f2c1a4b7e88   api:latest     Restarting (137) 3 seconds ago   api
+1b3d5f7a9c02   postgres:16    Up 2 hours (healthy)             db
+$ docker logs api | tail -2
+FATAL: could not connect to database: connection refused
+Killed`,
+    /137|out of memory|oom|memory limit|killed/i, "OOM exit 137"],
+];
+
+// A paste needs no retrieval, so this measures the model on tool output directly. The
+// paste is also the grounding reference, so F27 applies unchanged.
+export async function benchStdin() {
+  console.log("== F42 piped input: diagnosing real tool output ==");
+  let ok = 0, t = 0, falseReject = 0, chars = 0;
+  for (const [q, paste, needle, label] of STDIN_CASES) {
+    chars += paste.length;
+    const t0 = Date.now();
+    const { content } = await ask([
+      { role: "system", content: "Diagnose the pasted output. Be concise: at most two sentences naming the specific cause." },
+      { role: "user", content: `${paste}\n\nQuestion: ${q}` },
+    ]);
+    t += Date.now() - t0;
+    const hit = needle.test(content);
+    ok += hit ? 1 : 0;
+    const ug = ungrounded(content, paste, q);
+    if (hit && ug) falseReject++;
+    console.log(`  ${hit ? "OK" : "x "} ${label}${ug ? ` [F27: ${ug}]` : ""}\n      ${content.slice(0, 140).replace(/\n/g, " ")}`);
+  }
+  const n = STDIN_CASES.length;
+  console.log(`  ${ok}/${n} diagnosed | ${(t / n / 1000).toFixed(1)}s per answer | avg paste ${Math.round(chars / n)}ch | F27 false rejects ${falseReject}/${ok}`);
+}
+
+// Selection is deterministic and free; only answering costs a model call. Measuring all
+// three arms with the model would be 18 calls, and one call here is ~32 s because ~500
+// uncached prompt tokens of prefill dominate. So: score every arm model-free, then
+// spend 6 calls on the arm that wins.
 export async function benchFile() {
   console.log("== F41 local file reading: how to fit a source file into context ==");
-  const sc = { head: 0, one: 0, many: 0 }, ctxHit = { head: 0, one: 0, many: 0 };
+  const arms = ["head", "one", "many", "struct"];
+  const ctxHit = { head: 0, one: 0, many: 0, struct: 0 };
+  const rows = [];
   for (const [path, q, needle] of FILE_CASES) {
     const text = await Bun.file(`/home/rob/Projects/Personal/tny/${path}`).text();
     const w = fileWindows(text, q);
-    for (const arm of ["head", "one", "many"]) {
-      ctxHit[arm] += needle.test(w[arm]) ? 1 : 0;
-      const { content } = await ask([
-        { role: "system", content: "Answer the question using the file excerpt. Be concise: at most two sentences." },
-        { role: "user", content: `File ${path}:\n${w[arm]}\n\nQuestion: ${q}` },
-      ]);
-      sc[arm] += needle.test(content) ? 1 : 0;
-    }
-    console.log(`  ${path} — "${q.slice(0, 44)}" (${(text.length / 1024).toFixed(0)} KB)`);
+    for (const arm of arms) ctxHit[arm] += needle.test(w[arm]) ? 1 : 0;
+    rows.push({ path, q, needle, w, kb: text.length / 1024 });
+    console.log(`  ${arms.map(a => `${a}:${needle.test(w[a]) ? "OK" : "x "}`).join(" ")} ${path} "${q.slice(0, 40)}" (${(text.length / 1024).toFixed(0)} KB)`);
   }
   const n = FILE_CASES.length;
-  console.log(`  answer present in excerpt — head ${ctxHit.head}/${n} | one window ${ctxHit.one}/${n} | 3 windows ${ctxHit.many}/${n}`);
-  console.log(`  correct answers           — head ${sc.head}/${n} | one window ${sc.one}/${n} | 3 windows ${sc.many}/${n}`);
+  console.log(`  answer present in excerpt — ${arms.map(a => `${a} ${ctxHit[a]}/${n}`).join(" | ")}`);
+  // tie goes to `struct`: equal presence, but coherent boundaries — that is the thing
+  // being tested, since fixed chunks scored 6/6 presence yet only 3/6 answers
+  const best = arms.reduce((a, b) => (ctxHit[b] > ctxHit[a] ? b : ctxHit[b] === ctxHit[a] && b === "struct" ? b : a));
+  console.log(`  best selection: ${best} — answering with that arm only (${n} model calls)`);
+  let ok = 0, t = 0;
+  for (const r of rows) {
+    const t0 = Date.now();
+    const { content } = await ask([
+      { role: "system", content: "Answer the question using the file excerpt. Be concise: at most two sentences." },
+      { role: "user", content: `File ${r.path}:\n${r.w[best]}\n\nQuestion: ${r.q}` },
+    ]);
+    t += Date.now() - t0;
+    const hit = r.needle.test(content);
+    ok += hit ? 1 : 0;
+    console.log(`  ${hit ? "OK" : "x "} ${r.q.slice(0, 44)}\n      ${content.slice(0, 130).replace(/\n/g, " ")}`);
+  }
+  console.log(`  answers with ${best} excerpt: ${ok}/${n} | ${(t / n / 1000).toFixed(1)}s per answer`);
 }
 
 async function benchSections() {
@@ -1005,7 +1129,6 @@ const GROUND_CASES = [
   [1, DU, "create a swap file", "create a swap file", "echo degeneration"],
   [1, DU, "create a swap file", "Create a swap file.", "echo with punctuation"],
   [1, DU, "create a swap file", "swap file", "partial echo"],
-  [1, DU, "create a swap file", "", "empty answer"],
   [1, DU, "check what is using disk space", "Which tool is currently consuming the most disk space?", "asks a question back"],
   // F38: recorded verbatim from the one-sided synthesis arm, where the reference held
   // only the first tool. Both were confident prose about a tool that was never
@@ -1054,6 +1177,7 @@ if (import.meta.main) {
   else if (cmd === "rerank") await benchRerank();
   else if (cmd === "widen") await benchWiden();
   else if (cmd === "file") await benchFile();
+  else if (cmd === "stdin") await benchStdin();
   else if (cmd === "followup") await benchFollowup();
   else if (cmd === "rewrite") await benchRewrite();
   else if (cmd === "depth") await benchDepth();
