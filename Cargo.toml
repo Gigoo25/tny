@@ -1,0 +1,17 @@
+[package]
+name = "tny"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# TLS is needed for library.kiwix.org (catalog) and lb.download.kiwix.org (ZIMs).
+# Everything else tny talks to is localhost.
+ureq = "2"
+serde_json = "1"
+regex = "1"
+
+[profile.release]
+opt-level = "s"
+lto = true
+panic = "abort"
+strip = true

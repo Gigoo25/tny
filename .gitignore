@@ -2,3 +2,5 @@
 models/
 # ZIM corpora — tens of MB to hundreds of GB, managed by `tny --corpus`
 zim/
+# Cargo build output — 1,000+ files, all reproducible from Cargo.lock
+target/
