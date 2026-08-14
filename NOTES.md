@@ -1,0 +1,1136 @@
+# tny — small-model offline terminal assistant
+
+## Goal
+
+`tny "question"` — a Rust CLI for day-to-day terminal Q&A. Smallest possible model
+that still gives coherent, *correct* answers. **Fully offline**: all knowledge from
+local ZIM files, searched like a private search engine. The model's job is to
+*adapt* retrieved material to the exact question asked, not to recall facts.
+
+Portable: any computer, CPU-only, no GPU assumed.
+
+## Status
+
+Sessions 1–2 (2026-08-13). Model choice, retrieval architecture, and corpus plan
+are settled **by measurement**. No Rust written yet — deliberately; the
+measurements redirected the design five times.
+
+- `NOTES.md` — findings, append-only (this file)
+- `PLAN.md` — build sequence
+- `bench/harness.mjs` — runnable measurement harness (rebuilds every benchmark)
+
+## Where to pick up
+
+1. Read "Verdict" below, then `PLAN.md` phase P0.
+2. Start the three servers (see "Environment"), then `bun bench/harness.mjs all`
+   to reproduce the numbers before changing anything.
+3. First code: `PLAN.md` P0 (supervise the servers) — nothing else is blocked.
+
+Open decisions worth resolving before/while coding are in "Open questions".
+
+---
+
+## The one-paragraph summary
+
+Retrieval, not model size, produces correct answers — but it cannot substitute for
+capability. On the same six terminal questions with the answer verified present in
+context, LFM2.5-350M scored 2/6 while Qwen3.5-0.8B scored 5/6; without any corpus
+they scored 1/6 and 3/6. So **350M with the entire corpus still loses to 0.8B with
+none of it**: retrieval multiplies whatever capability exists. Selection, however,
+must never be done by the chat model — asking it to choose among candidates scored
+*worse than free Xapian rank-1*, while a 35 MB embedding model fused with Xapian by
+Reciprocal Rank Fusion scored 9/10. Final shape: Xapian + bge-small select, and
+Qwen3.5-0.8B (thinking disabled) adapts.
+
+## Verdict
+
+| Role | Choice | Size | Evidence |
+|---|---|---|---|
+| Answering | **Qwen3.5-0.8B Q8_0, `enable_thinking:false`** | ~0.9 GB | F20, F21, F23 |
+| Selecting + section ranking | **bge-small-en-v1.5 Q8_0** | ~35 MB | F17, F22 |
+| Knowledge | **ZIM files via `kiwix-serve`** | 82 MB → 18 GB tiers | F11–F14 |
+| Rejected as answerer | LFM2.5-350M | — | 2/6 with perfect context (F20/F23) |
+| Rejected outright | LFM2.5-1.2B-Thinking | — | never answered at all (F1) |
+| Rejected mechanism | model-as-judge | — | worse than free rank-1 (F16) |
+
+---
+
+## Guiding result (external)
+
+"Honey, I Shrunk the Coding Agent" (Itay Inbar, Apr 2026) —
+<https://itayinbarr.substack.com/p/honey-i-shrunk-the-coding-agent>
+
+Same 9B weights: Aider scaffold 19.11% → purpose-built `little-coder` 45.56% on
+Aider Polyglot. **Scaffold–model fit, not model size, was the dominant variable.**
+Transferable mechanisms: bounded thinking budget with abort-and-retry; structured
+*directive* tool errors ("file exists, use Edit"); malformed tool-call repair;
+loop/repetition abort; catch empty responses; small per-turn context injections
+rather than one big preamble; retry-with-feedback worth 18% of passes; and
+supervise the runtime — their Ollama server died mid-run and silently degraded
+results.
+
+Prior art for the UX: **`samtay/so`** <https://github.com/samtay/so> (Rust, 1.4k★,
+terminal Stack Overflow browser). It **dropped DuckDuckGo as default because DDG
+blocks requests** ([issue #16](https://github.com/samtay/so/issues/16)),
+independently confirming what we measured. `tny` differs in kind: `so` shows an
+existing answer; `tny` rewrites retrieved material for your specific question.
+
+## Measurement rig ≠ target machine
+
+A deliberately weak, busy box (browser + editor open), ±10% noise. Treat the
+*shape* of each result as the finding, not the absolute seconds.
+
+- Intel i5-5250U (Broadwell, 2 cores / 4 threads), AVX2 + FMA + F16C, no AVX-512
+- 7.7 GiB RAM, ~1.3 GiB free during tests
+- llama.cpp b10273 (`a6aa6f5`), auto-dispatch to `libggml-cpu-haswell.so`
+- kiwix-tools 3.8.2 (libkiwix 14.2.1, libzim 9.8.1, **xapian 1.4.31**)
+
+## Environment
+
+```sh
+nix-shell -p llama-cpp     # llama-cli, llama-server, llama-bench
+nix-shell -p kiwix-tools   # kiwix-serve, kiwix-search, kiwix-manage
+export LLAMA_CACHE=$PWD/models
+```
+
+The three servers used for every measurement:
+
+```sh
+# knowledge (port 8082)
+kiwix-serve --port 8082 --address 127.0.0.1 zim/*.zim
+# answering (port 8080)
+llama-server -hf ggml-org/Qwen3.5-0.8B-GGUF:Q8_0 --no-mmproj -t 4 -c 8192 --jinja \
+             --port 8080
+# selection (port 8084)
+llama-server -hf ggml-org/bge-small-en-v1.5-Q8_0-GGUF --embeddings --pooling cls \
+             -c 512 -t 4 --port 8084
+```
+
+`--jinja` is required for the native LFM2.5 tool-call handler (F6). `--no-mmproj` is
+required for every Qwen3.5 GGUF, which are vision models whose 671 MB projector
+llama.cpp otherwise downloads and loads for nothing (F25). Add
+`--reasoning-format none` only when debugging thinking output (F19).
+
+## On disk
+
+```
+zim/devdocs_en_bash_2026-04.zim          545 KB   132 articles, _ftindex:no
+zim/devdocs_en_rust_2026-07.zim          5.9 MB  2,983 articles, _ftindex:no
+zim/archlinux_en_all_maxi_2026-07.zim     34 MB 14,497 articles, _ftindex:YES
+models/  LFM2.5-350M Q8_0, LFM2.5-230M Q8_0, LFM2.5-1.2B-Thinking Q4_0+Q4_K_M,
+         Qwen3.5-0.8B Q8_0, bge-small-en-v1.5 Q8_0        (all via llama.cpp -hf)
+         Qwen3.5-2B Q4_K_M, byte-verified 1,280,835,840 B, at
+           models/Qwen3.5-2B-Q4_K_M.gguf — kept for the harder fixture (F26);
+           serve with `-m` since the `-hf` blob was the corrupt one
+```
+
+## Models evaluated
+
+| Model | Quant | Size | Params | Notes |
+|---|---|---|---|---|
+| LFM2.5-1.2B-Thinking | Q4_0 / Q4_K_M | 661 / 695 MiB | 1.17 B | rejected, F1 |
+| LFM2.5-350M | Q8_0 | 359 MiB | 354 M | rejected as answerer, F20 |
+| LFM2.5-230M | Q8_0 | 233 MiB | 230 M | faster, weaker extraction |
+| **Qwen3.5-0.8B** | **Q8_0** | **~0.9 GB** | 0.8 B | **chosen answerer** |
+| **bge-small-en-v1.5** | **Q8_0** | **~35 MiB** | 33 M | **chosen selector**, 384-dim |
+
+LFM2.5 are `lfm2` arch: hybrid, only 6 attention layers → small KV cache. Vocab
+65536, context 32768, knowledge cutoff mid-2024. At these sizes **Q8_0 is the right
+default** — 230M Q8_0 (233 MiB) is *smaller* than 1.2B Q4_0 (661 MiB) and
+near-lossless; quantisation damage hurts tiny models proportionally more.
+
+---
+
+# Part 1 — model findings
+
+## F1 — the 1.2B Thinking model is the wrong tool
+
+"How do I find files larger than 100MB in bash?", `-n 900`, temp 0.05: spent **all
+900 tokens thinking, never answered.** 107 s, truncated mid-sentence. Hallucinated
+`-type l`, doubted whether `find` has `-size`, recomputed "100MB in bytes" three
+times, converging on `-size +104857600` — **wrong** (bare `-size` counts 512-byte
+blocks; correct is `+100M` or `+104857600c`). Both non-thinking models got it right
+in ~10 s.
+
+## F2 — reasoning-budget flags exist but do not fix deliberation
+
+llama.cpp ships `--reasoning-budget N`, `--reasoning-budget-message`, `-rea
+on|off|auto`, `--reasoning-format`, `--reasoning-preserve`. On the 1.2B:
+
+| Config | Result |
+|---|---|
+| `--reasoning-budget 200` | **Works** — injects `</think>`. Model then deliberates in plain text. |
+| `--reasoning-budget 0` | Emits `<think></think>`, rambles in content channel anyway. |
+| `-rea off` | **Empty output.** Broken for this template. |
+| budget + steering + terse prompt | Right answer first, then relapsed into "Duplicate? No, better:…" |
+
+The habit is in the weights, not the tags.
+
+## F3 — CPU knobs are machine-dependent → autotune, never hardcode
+
+1.2B thread sweep, pp512 / tg64, r=3:
+
+| Quant | t=1 | t=2 | t=3 | t=4 |
+|---|---|---|---|---|
+| Q4_0 pp512 | 11.92 | 20.85 | 24.77 | **29.54** |
+| Q4_0 tg64 | 6.50 | 10.11 | 11.09 | **12.64** |
+| Q4_K_M pp512 | 15.98 | 25.03 | **27.60** | 27.75 |
+| Q4_K_M tg64 | 6.94 | 10.45 | **11.39** | 9.72 |
+
+- Hyperthreads **helped Q4_0** (t=4 > t=2 on 2 physical cores) but **hurt Q4_K_M**.
+- **BLAS is not worth it**: pp512 27.57 vs 27.31 t/s, inside noise. Ship CPU-only.
+  (To test: copy `llama-bench` + `libggml-cpu-*.so` to an empty dir;
+  `GGML_BACKEND_PATH` does not suppress backends in the binary's own dir.)
+- **Flash attention ≈ +15–20% decode** (tg32 10.9–11.8 vs 8.1–9.6); `auto` enables it.
+- `--poll 0` vs `50`: noise.
+
+## F4 — small non-thinking models answer fast
+
+temp 0.1 / top_k 50 / rep-pen 1.05, t=4:
+
+| Model | Prefill t/s | Decode t/s | "files > 100MB" |
+|---|---|---|---|
+| 1.2B Thinking Q4_0 | 21.9 | 8.6 | **no answer** (burned 900 tok) |
+| 350M Q8_0 | 53.5 | 15.4 | correct (`find . -type f -size +100M`) |
+| 230M Q8_0 | 82.6 | 22.5 | correct, cleanest phrasing |
+
+**Model load: 359 MiB Q8_0 in 1.5 s** — a resident server is a latency
+optimisation, not a requirement.
+
+## F5 — they fabricate confidently → lookup is mandatory
+
+"What is C. elegans?" from memory:
+
+- **350M**: "commonly known as the 'little worm'", "first discovered in 1878 by the
+  German zoologist Karl von Frisch", "three main parts: head, thorax, and abdomen",
+  "the thorax contains the exoskeleton". That is insect anatomy; von Frisch (b. 1886)
+  studied bees.
+- **230M**: "Contains only 2,000 genes" (actually ~20,000).
+- Rust compiler version: **"4.0.0"** on one run. With retrieved text: **1.97.1** ✓.
+
+## F6 — llama.cpp has native LFM2.5 tool-call support
+
+`libllama-common.so` (b10273) contains `Using specialized template: LFM2.5`,
+`tool_call_start_marker`, `<|tool_call_start|>`, `<|tool_call_end|>`, python-or-json
+arg parsing. Verified live with `--jinja` + OpenAI `tools`:
+
+```
+"What is in the file ./Cargo.toml?"  -> read_file  {"path":"./Cargo.toml"}
+"Who won the 2026 Super Bowl?"       -> web_search {"query":"who won the 2026 Super Bowl"}
+"What is 12 * 7?"                    -> direct, "84"
+```
+
+No tool-call parser or GBNF grammar needed. **`tool_choice:"required"` is silently
+ignored** — the harness must decide and inject results itself. (With ZIM-only
+retrieval and harness-side routing, `tny` may not need tool calling at all; kept
+here because it is verified and cheap.)
+
+## F7 — routing: positive phrasing wins, negations backfire
+
+| Variant | Score /10 | Failure |
+|---|---|---|
+| no system prompt | 7 | misses version lookups; never reads files |
+| aggressive | 7 | over-searches `12 * 7`, `chmod 755` |
+| **V2 (short, positive)** | **8, 8, 9** | misses "Summarize the file src/main.rs" |
+| V3 (+ "Do NOT search for arithmetic") | 6 | **searched arithmetic more** |
+| V4 (V2 + explicit read_file rule) | 7, 7 | more spurious searching |
+
+**Negations backfire at this scale.** V2 is the ceiling for prompt-only routing, so
+path-like queries must be handled deterministically in the harness.
+
+## F8 — fabrication lives in the elaboration
+
+Headline fact right, *tail* invented: Rust "**1.97.1**" ✓ then fake release dates;
+"Linda Yaccarino" ✓ then "since November 2021", "CEO from 2015 to 2021", plus
+"Before joining Yaccarino".
+
+| Contract | max_tok | "How many neurons does C. elegans have?" |
+|---|---|---|
+| terse | 80 | "C. elegans has 302 neurons." ✓ |
+| verbose | 250 | "302" ✓ then "a single brain and body wall muscles" ✗ |
+
+## F9 — ⚠️ never give the model a refusal escape hatch
+
+The contract ended "If the results do not contain the answer, reply exactly: not
+found in results." On prose that looked safe. On **code it collapses**:
+
+| System prompt | Context | Result |
+|---|---|---|
+| with escape clause | Stack Exchange answer, fenced code | "not found in results." |
+| with escape clause | link-refs denoised | "not found in results." |
+| with escape clause | fences stripped | "not found in results." |
+| with escape clause | `>>>` prompts stripped | "not found in results." |
+| **escape clause removed** | identical context | **correct answer + working code** |
+
+The answer (`list(reversed(xs))`) was present every time. **Detect emptiness in the
+harness; never delegate it to the model.**
+
+## F10 — ⚠️ methodology: always assert the answer was retrievable
+
+Two experiments were invalidated by skipping this. Mid-session DuckDuckGo began
+serving CAPTCHAs, so the model was fed **empty** context and its correct "not found"
+replies looked like over-refusal. Every retrieval test must first assert the answer
+is present in the fed context, or you are measuring your own pipeline. Implemented
+as `oracle()` / the `has` flag in `bench/harness.mjs`.
+
+---
+
+# Part 2 — retrieval architecture (offline, ZIM-only)
+
+**Decision: all knowledge comes from local ZIM files served by `kiwix-serve`.** One
+mechanism, offline, no API keys, no rate limits, no CAPTCHAs, no network latency.
+Supersedes the earlier four-web-backend design (Wikipedia API, Stack Exchange API,
+DevDocs HTTP, Grokipedia scraping), retained only as a possible online fallback for
+staleness. Those APIs *were* verified working and are documented in git history if
+needed.
+
+## F11 — kiwix-serve API surface
+
+| Need | Endpoint | Notes |
+|---|---|---|
+| list books | `/catalog/v2/entries?count=-1` | OPDS Atom: `<name>`, `<tags>`, `articleCount` |
+| full-text search | `/search?books.name=<id>&pattern=<q>&format=xml&pageLength=N` | RSS `<item>` = title + link + **snippet** |
+| fuzzy title lookup | `/suggest?content=<id>&term=<t>` | JSON, substring, returns `path` |
+| fetch article | `/content/<id>/<path>` | article HTML |
+| random article | `/random?content=<id>` | smoke tests |
+
+**Book id is the filename stem** (`devdocs_en_rust_2026-07`), *not* the ZIM's
+internal `<name>` (`devdocs_en_rust`) — the latter gives `400 No such book`. Param
+names are strict: `/suggest` needs **`content=`** (`books.name=` and `book=` both
+404); `/search` needs **`books.name=`**.
+
+## F12 — [CORRECTED] `_ftindex:no` does NOT mean unsearchable
+
+Catalog `<tags>` carries `_ftindex:yes|no`:
+
+| ZIM | articles | ftindex |
+|---|---|---|
+| `archlinux_en_all_maxi` | 14,497 | **yes** |
+| `devdocs_en_rust` | 2,983 | **no** |
+| `devdocs_en_bash` | 132 | **no** |
+
+**The original conclusion here was wrong.** I recorded that `/search` is unavailable on
+DevDocs ZIMs and that retrieval strategy must therefore be chosen per book from its
+tags. That was inferred from `HTTP 400 Invalid request`, which was really a
+**name-format error**: `books.name` wants the *filename stem*, not the catalog `<name>`.
+
+| Request | Result |
+|---|---|
+| `books.name=devdocs_en_bash` (catalog name) | **400 Invalid request** |
+| `books.name=devdocs_en_bash_2026-04` (file stem) | **200, 3 hits** |
+| no `books.name` at all — every mounted ZIM | **200, 3 hits** |
+
+And it is genuine body-level full text, not title matching. `pattern=Bourne Again SHell
+acronym` against the `_ftindex:no` bash ZIM returns §Basic Shell Features with the
+snippet *"Bash is an acronym for 'Bourne-Again SHell'"* — prose that appears in no
+title. `pattern=reallocating minimum capacity` likewise hits `std::ffi::OsString` body
+text in the rust ZIM.
+
+**Consequences for the design:**
+
+1. **No per-book routing stage.** One `/search` with no `books.name` searches every
+   mounted ZIM and returns each hit's book in its `<link>` — content, not configuration,
+   picks the corpus. "swap file" → archlinux, "Vec with_capacity" → rust,
+   "shell parameter expansion" → bash.
+2. **`/suggest` is not needed for *search*,** only for exact title→path lookup (F13).
+   Its parameter is `content=<file stem>`, not `book=` (that 404s).
+3. `_ftindex` remains worth reading for *diagnostics*, but must not gate retrieval.
+
+
+## F13 — DevDocs ZIMs: suggest → path → anchor
+
+- Titles are fully qualified: `/random` returned `std::fmt::UpperHex`.
+- `/suggest?term=Vec` → `std::vec::Vec` → `std/vec/struct.vec`; `term=HashMap` →
+  `std::collections::HashMap`. Substring, not just prefix.
+- **Method-level titles are absent**: `term=std::vec::Vec::with` → only a `pattern`
+  row. Entries are page-level.
+- **Anchors survive inside the page**: `std/vec/struct.vec` is 457 KB with **240**
+  `id="method.*"` anchors including `method.with_capacity`.
+- The devdocs ZIM root article is *not* an index (2.4 KB, 10 links to the Rust book),
+  so entries cannot be enumerated for free.
+
+So: **`/suggest` for the page, then slice by `#anchor` for the member** — no local
+cache, no `index.json`. Match exact name → prefix → substring; a bare substring
+match on "with_capacity" returns nightly-only `try_with_capacity`.
+
+## F14 — `_maxi` ZIMs are polluted with localised duplicates
+
+The *English* Arch ZIM contains `Netboot (Magyar)`, `Solid state drive (Magyar)`, …
+At `pageLength=6` these consumed half the candidate list (only 2–4 of 6 survived).
+**Request ~30 candidates, strip `(<Language>)` titles, dedupe by base title, keep
+top 8.**
+
+## F15 — query preparation is needed for Xapian recall
+
+"why is my wifi not connecting" returned **zero** usable candidates raw. Stripping
+question words and stopwords gave `"wifi connecting"` → 8 candidates including
+NetworkManager and Netctl.
+
+## F16 — ⚠️ the chat model is not worth its cost as a judge
+
+The proposed design was "fuzzy-find candidates, let the model judge". Measured on 6
+Arch queries with identical cached candidate lists:
+
+| Selector | Score |
+|---|---|
+| Xapian rank-1 (free, deterministic) | **4/6** |
+| 350M judge, forward order | 2/6 |
+| 350M judge, reversed order | 4/6 |
+| 350M judge, output title not index | 3/6 |
+| **Qwen3.5-0.8B judge** | 3/6 · then 4, 4, 5 on re-runs |
+| **RRF fusion (F17)** | **5/6** |
+
+350M's picks were **#7, #7, #5, #7, #7, #8** forward and **#8, #7, #7, #7, #7, #7**
+reversed — a near-constant index regardless of content. Reversing the list scores
+4/6 only because it reshuffles which article lands in that fixed slot: luck, not
+signal. Asking for the *title* removed the constant-index artifact (0 unmatched —
+string copying works) but still lost to free rank-1. Qwen-0.8B's picks *did* vary
+(3,1,6,1,5,1) so it attends to content, but it still lost to rank-1 and to RRF.
+
+The information was present — correct articles sat at #4 (Udisks), #2 (USB flash
+installation medium), #2 (NetworkManager). Selection is simply not a capability
+these models have.
+
+**Correction after three re-runs.** Qwen-0.8B's judge scored **4, 4, 5** against
+rank-1's constant **4/6** — so at 0.8B the judge is *not* clearly worse than rank-1;
+the original single 3/6 was inside sampling noise. The decision is unchanged but its
+reason is narrower: the judge still loses to **RRF's 9/10** (F17), its picks are
+heavily biased to index 1 (`4,1,6,1,1,1` / `4,1,1,1,1,1`) so it mostly *reproduces*
+rank-1, and it costs a full model call and seconds of latency to do it. **Free and
+deterministic beats paid and equal** — but "the model cannot judge" overstates the
+evidence at 0.8B. The strong claim holds only for 350M, whose near-constant index is
+a genuine pathology.
+
+## F17 — hybrid retrieval + RRF fusion (9/10)
+
+Arch titles do not lexically match natural questions — "Udisks" shares no term with
+"mount usb drive automatically" — so no lexical or fuzzy re-rank can bridge it. The
+gap is semantic, and a **33 M-param, 35 MB** model closes it. 10-query Arch
+benchmark, top-8 candidates:
+
+| Selector | Score |
+|---|---|
+| Xapian rank-1 | 8/10 |
+| bge-small, query vs **title** | 8/10 |
+| bge-small, query vs **title + snippet** | 8/10 |
+| **RRF fusion of all three** | **9/10** |
+
+Single signals tie but **fail on different queries** (rank-1 missed usb-mount and
+bootable-usb; emb-title missed usb-mount and encrypt; emb+snippet missed timezone
+and wifi) — exactly the condition where RRF wins. RRF is ~10 lines, deterministic,
+no chat model: `score(d) = Σ 1/(k + rank_i(d))`, k=10.
+
+Cost: one batched `/v1/embeddings` call (query + 8 titles + 8 title/snippet pairs =
+17 texts) ≈ **2.3 s** on this weak box. bge-small requires the asymmetric query
+prefix `"Represent this sentence for searching relevant passages: "`.
+
+Remaining failure: "mount a usb drive automatically" → *Solid state drive*
+(emb+snippet had Udisks right but was outvoted).
+
+## F18 — answering is faithful only when the section is on-point
+
+Oracle fixtures (section verified to contain the answer), 350M:
+
+| Query | Section | Answer | Verdict |
+|---|---|---|---|
+| encrypt a partition | Encryption options for LUKS mode | "`cryptsetup luksFormat`" | **OK** |
+| generate an ssh key | Generating an SSH key pair | `ssh-keygen`, correct `id_ed25519` path | **OK** |
+| set the system timezone | UTC in Microsoft Windows | "set the system timezone to UTC." | ✗ |
+| mount a usb drive automatically | Installation | **fabricated** `mount -t cdr usb-drive` | ✗ |
+
+2/4 faithful. Both failures were fed *tangential* sections that merely contained the
+keyword, and the model invented a plausible command rather than saying so. Section
+selection is as load-bearing as article selection.
+
+## F19 — ⚠️ Qwen3.5-0.8B thinking mode is unusable (verified from raw bytes)
+
+Qwen3.5 is thinking-by-default. For the trivial prompt "Say OK." with
+`max_tokens:60` it returned `content:""`, `finish_reason:"length"`, and
+`reasoning_content:"Thinking Process:\n\n1. **Analyze the Input:** …"` — all 60
+tokens spent deliberating.
+
+Because empty `content` looks like a parsing bug, this was re-verified with
+`--reasoning-format none`, which puts **raw** output (tags included) into `content`:
+
+```
+max_tokens=512: finish=length gen=512 in 95.5s
+  content 1770ch | reasoning_content 0ch | closed </think>: false
+  head: "<think>\nThinking Process:\n\n1.  **Analyze the Request:** …"
+```
+
+So the model opens `<think>` and **never closes it within 512 tokens**. The empty
+answers were real, not a parse artifact. Earlier runs on real questions took 83–93 s
+each and produced nothing. Whether 2048 tokens would eventually close is unmeasured
+— 95.5 s for 512 tokens already disqualifies it for a terminal tool.
+
+**Two hard requirements:**
+1. Always send `chat_template_kwargs: {"enable_thinking": false}`. With it, the same
+   prompt answers in one short turn.
+2. **Treat empty `content` as an error**, never as an answer — llama.cpp routes
+   reasoning to a separate field, so a naive client silently prints blanks.
+
+## F20 — model comparison on identical contexts
+
+Six terminal questions, top-3 embedding-selected Arch sections, answer verified
+present in context **6/6**, `max_tokens:160`:
+
+| Model | Correct | Latency |
+|---|---|---|
+| LFM2.5-350M Q8_0 | **2/6** | 7.2 s/answer |
+| Qwen3.5-0.8B Q8_0 (thinking off) | **5/6 – 6/6** | 15.3–17.5 s/answer |
+| Qwen3.5-0.8B Q8_0 (thinking on) | **0/3** before abort | 83–93 s/answer |
+
+Throughput caveat: a fresh, uncached Qwen call was **372 prompt + 85 generated
+tokens in 25.5 s**. An earlier "8.4 s/answer" figure was a prompt-cache artifact —
+Qwen is genuinely ~3× slower than 350M, not equal.
+
+Score variance: two runs of the identical benchmark gave **5/6 and 6/6** — the
+"check what is using disk space" case flipped from "Which tool is being used to
+check disk usage?" to "Use `du` or `ncdu`." At temp 0.1 a single benchmark run is
+not a precise number; treat these as ranges and re-run before trusting a delta of 1.
+
+Cosmetic note: with `--reasoning-format none` and `enable_thinking:false` the
+template still emits an empty `<think>  </think>` into `content`. Harmless, but the
+harness and `tny` should strip it.
+
+## F21 — does a good corpus let a small model punch above its weight?
+
+Same six questions, with and without reference material:
+
+| Model | no corpus | with corpus |
+|---|---|---|
+| LFM2.5-350M | 1/6 | **2/6** |
+| Qwen3.5-0.8B | 3/6 | **5/6** |
+
+**Yes, but it multiplies capability rather than substituting for it.** Retrieval is
+the single biggest lever — it converts confident, *dangerous* fabrication into
+correct commands. Unretrieved, 350M proposed `swapfile.exe /dev/sdb` (a Windows
+binary) and Python `cryptography.fernet` to encrypt a *partition*; Qwen proposed
+`mkfs -f` with "`xfs -f -f`" — running that destroys data.
+
+But the decisive comparison: **350M *with* the whole corpus (2/6) still loses to
+Qwen *without* any of it (3/6).** Good data cannot close a capability gap.
+
+## F22 — section selection: embeddings win, fusion does not
+
+Six probes, "is the answer inside the chosen section?":
+
+| Method | Score |
+|---|---|
+| heuristic heading scorer (`Σ|term| / √words`) | 2/6 |
+| **bge-small embedding, argmax section** | **4/6** |
+| RRF(embedding, heuristic) top-1 | 4/6 |
+| RRF top-2 | 4/6 |
+| RRF top-3 | 5/6 |
+| **embedding, top-3 sections × 600 chars** | **6/6** |
+
+Two lessons:
+1. **Fuse at article level, embed-only at section level.** Fusion *hurt* here — the
+   heuristic displaced embedding's correct §"du alternatives".
+2. **Stop chasing a perfect argmax.** Three short sections (~1570 chars total) put
+   the answer in context 6/6, which argmax never did.
+
+Earlier heuristic failure worth remembering: matching bare tokens let "system" score
+against "Set hardware clock from system clock" as strongly as "timezone" scored
+against "Time zone"; normalising away spaces was necessary but insufficient.
+
+## F23 — 350M's failure mode with perfect context is degeneration
+
+Given the answer in context, 350M did not merely pick wrong facts — it stopped
+answering:
+
+| Query | 350M output |
+|---|---|
+| generate an ssh key | "generate an ssh key" (echoed the question) |
+| encrypt a partition | "Encrypt a partition using LUKS mode." (no command) |
+| check what is using disk space | "Check the command that lists disk usage." |
+
+Instruction-following collapse, not missing knowledge — and unfixable by better
+retrieval. This is why 350M is rejected as the answerer.
+
+## F24 — a bigger, purpose-built embedder is *worse* here
+
+Hypothesis: bge-small is a general-purpose 33 M model, so a retrieval-specialised
+one should rank better. Tested `nomic-embed-text-v1.5` Q8_0 (137 M, 4× the size,
+trained for retrieval, `search_query:` / `search_document:` prefixes) on the same
+two benchmarks:
+
+| Signal | bge-small (33 M) | nomic (137 M) |
+|---|---|---|
+| article RRF | **9/10** | 8/10 |
+| emb·title | **8/10** | 6/10 |
+| emb·title+snippet | 8/10 | 8/10 |
+| section presence (top-3) | 6/6 | 6/6 |
+| wall time | ~21 s (sections) | ~3–5× slower |
+
+**bge-small stays.** The collapse is in *title* similarity (8→6): article ranking is
+dominated by 1–3 word titles ("Udisks", "Systemd"), and nomic is tuned for
+passage-length text. Sections tie on presence, though nomic's picks read better
+qualitatively (§"Encrypting devices with LUKS mode" ranked first vs bge's
+§"Resizing encrypted devices").
+
+Corollary: embedder scaling is **not** the lever. `bench/harness.mjs` takes
+`TNY_EMBED`, `TNY_QP`, `TNY_DP`, so re-testing another embedder
+(embeddinggemma-300m, LFM2.5-Embedding-350M, Qwen3-Embedding-0.6B) is a one-line
+experiment if it ever looks worthwhile.
+
+## F25 — two operational hazards in llama.cpp's `-hf` downloader
+
+Both cost real time this session and both must be handled by `tny`:
+
+1. **Qwen3.5 GGUFs are multimodal.** `-hf unsloth/Qwen3.5-2B-GGUF:Q4_K_M` silently
+   began downloading `mmproj-BF16.gguf` (671 MB) that a text-only tool never uses;
+   the server sat in `starting` for 10 minutes. Fix: **always pass `--no-mmproj`**.
+   With it, the same server was ready in 5.7 s.
+2. **An interrupted download is left looking complete.** After killing the mmproj
+   fetch, `models/…/blobs/` held a 945,661,018-byte file with no
+   `.downloadInProgress` suffix. That size matches **no file** in the repo
+   (Q4_K_M is 1,280,835,840 — it was 74% of one). llama.cpp loaded it without a
+   single warning and the model emitted pure ASCII garbage:
+   `DIO*=C,B5O%%NFH@OB->KB;M@R:4(1Q+…` for every prompt, 0/6, 60.2 s/answer.
+
+**Never trust a model file's presence — verify its byte size** (HF exposes it via
+`/api/models/<repo>/tree/main`) before serving, and treat non-text output as a
+corrupt-model signal rather than a capability result. This nearly got recorded as
+"2B is bad".
+
+## F26 — 2B measured: no accuracy gain, 2.2× the cost
+
+Qwen3.5-2B Q4_K_M (1.28 GB, byte-verified), served `--no-mmproj`, on the identical
+fixtures:
+
+| Benchmark | Qwen3.5-0.8B Q8_0 | Qwen3.5-2B Q4_K_M |
+|---|---|---|
+| answering, needle present 6/6 | **6/6** | **6/6** |
+| latency (cold) | **12.7–17.5 s** | 33.9 s |
+| no corpus → with corpus | 3/6 → 5–6/6 | 3/6 → 6/6 |
+| refusal on mismatched context | 4–5/6 | 5/6 |
+
+**The 6-case answering fixture is saturated** — both models score 6/6, so it can no
+longer discriminate and any further model comparison needs harder cases.
+
+2B fabricates just as dangerously without a corpus: it proposed **`mkfs.ext4` to
+"mount" a USB drive** (that formats the disk) and an invented
+`cryptsetup --keyring …`. Scale does not fix fabrication; the corpus does.
+
+New benchmark `refuse` supplies the discrimination that was missing: each question
+is paired with a *different* question's sections, so the answer is absent by
+construction and declining is the only correct behaviour. Two distinct failure
+modes appeared:
+
+- **both models**: answered `ssh-keygen -t rsa -b 4096` from parametric memory —
+  *correct but unfaithful*, which is the dangerous class, because the same reflex
+  fires when memory is wrong.
+- **0.8B only**: echoed the question back verbatim (`"create a swap file"`) — the
+  F23 degeneration seen at 350M, surfacing at 0.8B under harder conditions.
+
+## F27 — a model-free grounding check beats the model upgrade
+
+Both F26 failure modes are detectable **without a model**, so 2B's single advantage
+is purchasable for free. `ungrounded(answer, ref, question)` returns a reason string,
+or `""` when the answer is grounded. Final rules, after three defects found by
+sampling:
+
+1. **Every command the answer proposes must appear in the reference.** Commands are
+   collected from all three forms models actually emit — inline `` `cmd` ``, fenced
+   blocks, and prompt lines (`# cmd`) — matched at word boundaries.
+2. If the answer proposes **no** command, reject it when it merely **restates the
+   question**, or when it is **only a question** (`/^[^.!]*\?\s*$/`).
+3. Empty content is rejected (F19).
+
+| Metric | model alone | model + F27 |
+|---|---|---|
+| refusal, mismatched context (0.8B) | 4–5/6 | **6/6**, three runs |
+| refusal, mismatched context (2B) | 5/6 | **6/6** |
+| false rejects on correct answers | — | **0/30** samples at temp 0.3 |
+| wrong answers let through | — | **0/30**; the one wrong answer was caught |
+| self-test | — | **17/17**, pure, no servers: `harness.mjs ground` |
+
+### The three defects, all found by sampling rather than by one run
+
+A single benchmark run reported "0 false rejects" three separate times while the
+check was still broken. Only repeated sampling at temp 0.3 exposed each fault, so the
+rules are only trustworthy to the extent they were *attacked*:
+
+1. **Substring matching.** `ref.includes("du")` is satisfied by "pro**du**ce".
+   Fixed with word-boundary regex.
+2. **Minimum command length.** A `length > 2` filter silently dropped `du`, `df`,
+   `ls`, `ip` — the commands users ask about most — so `` Use `du -h` … `` fell
+   through to rule 2 and was rejected. The first live run passed only because `ncdu`
+   happened to also be present.
+3. **Word-overlap ratio.** The original rule 2 (">60 % of words come from the
+   question") rejected the *correct* answers `# timedatectl set-timezone` (a prompt
+   line, so no command was extracted) and `Use timedatectl set-timezone to set the
+   timezone.` (unmarked command). It had caught exactly **one** real failure while
+   producing two false-reject classes, so it was **deleted** in favour of exact
+   containment. A false reject is strictly worse than a missed echo: it converts a
+   correct answer into "not found" and destroys trust in the tool.
+
+Two further live findings folded in: a quoted **path**
+(`/home/username/.ssh/id_ed25519`) is not a command and must be skipped, and the
+model sometimes **asks a question back** instead of answering — a wrong answer the
+first version let through.
+
+**Decision: 0.8B stays the answerer, and grounding is enforced in `tny`, not
+delegated to the model.** A bigger model is the expensive way to buy what a regex
+already provides — but the regex must be attacked by sampling before it is believed.
+
+## Corpus catalogue (English, `library.kiwix.org`, 1,286 ZIMs)
+
+| ZIM | Size | Articles |
+|---|---|---|
+| `devdocs_en_bash` | 0.6 MB | 132 |
+| `devdocs_en_git` / `_go` | 1.6 MB | 206 / 192 |
+| `devdocs_en_postgresql` | 2.6 MB | 683 |
+| `devdocs_en_javascript` | 2.7 MB | 1,291 |
+| `devdocs_en_python` | 4.4 MB | 497 |
+| `devdocs_en_rust` | 6.2 MB | 2,983 |
+| `devdocs_en_man` | 29.6 MB | 12,626 |
+| `archlinux_en_all` | 35.6 MB | 14,497 |
+| `www.mankier.com_en_all` | 190 MB | 73,481 |
+| `wikipedia_en_100` | 4.6 / 15.3 / 52.7 / 332 MB | 5,032 |
+| `security.stackexchange.com_en_all` | 440 MB | 132,039 |
+| `softwareengineering.stackexchange.com` | 479 MB | 129,851 |
+| `codereview.stackexchange.com_en_all` | 551 MB | 136,194 |
+| `dba.stackexchange.com_en_all` | 702 MB | 177,961 |
+| `unix.stackexchange.com_en_all` | 1.31 GB | 413,259 |
+| `wikipedia_en_wp1-0.8` | 2.35 / 8.49 GB | 855,632 |
+| `docs.python.org_en_all` | 2.93 GB | 20,068 |
+| `wikipedia_en_all` | **12.53 / 52.69 / 123.98 GB** | ~19,000,000 |
+| `stackoverflow.com_en_all` | **80.48 GB** | 30,138,063 |
+
+- **The whole API-reference layer costs < 50 MB** (rust + python + bash + git + go +
+  javascript + man ≈ 46 MB). `devdocs_en_python` (4.4 MB) does the same job as
+  `docs.python.org_en_all` (2.93 GB) at 1/660 the size.
+- **Arch Wiki at 35.6 MB is the best value per byte** for terminal questions.
+- **Avoid `stackoverflow.com_en_all` (80 GB)**; topical dev sites are 0.44–1.31 GB,
+  and `unix.stackexchange` is the highest-yield single addition.
+- Wikipedia: `wikipedia_en_wp1-0.8` mini (2.35 GB, 855 k important articles) is the
+  sweet spot; `wikipedia_en_100` (332 MB) the minimal option.
+- Download URLs arrive as `.zim.meta4` — strip `.meta4`. Host `lb.download.kiwix.org`.
+
+## Latency budget (Qwen-0.8B + bge, this weak box)
+
+| Stage | Time |
+|---|---|
+| Xapian search (local) | ~10 ms |
+| article fetch + section split (local) | ~20 ms |
+| embedding re-rank, 17 texts batched | 2.3 s |
+| answer, ~1570-char context, ≤160 tok | 17.5 s |
+| **total, warm servers** | **~20 s** |
+
+Prefill dominates. On any modern multi-core machine expect several× better; this box
+is a 2-core 2015 Broadwell under browser load. Levers, best first: tighter sections;
+fewer candidates to embed; smaller `max_tokens`; 350M for the *selection-only* paths.
+
+## Sampling defaults
+
+- Qwen3.5-0.8B: `temperature 0.1`, `top_k 50`, `repeat_penalty 1.05`,
+  **`enable_thinking:false`**
+- LFM2.5 (if reused): `temperature 0.1`, `top_k 50`, `repetition_penalty 1.05`
+
+---
+
+## Design decisions
+
+1. **Qwen3.5-0.8B Q8_0 answers, thinking disabled** (F19, F20, F21) — and it stays
+   the default: 2B scored identically at 2.2× the latency (F26).
+2. **Treat empty `content` as an error** (F19).
+3. **bge-small-en-v1.5 selects sections only** — at article level Xapian + lexical
+   RRF matches it 9/10 for free (F17, F22, F31).
+4. **The chat model never chooses** (F16).
+5. **ZIM-only knowledge via supervised `kiwix-serve`** (F11).
+6. **Retrieval strategy per book, from its `_ftindex` tag** (F12).
+7. **Structural extraction**: `#anchor` for reference pages, top-3 embedded sections
+   for wiki pages (F13, F22).
+8. **Fuse at article level (Xapian + lexical, no embedder); embed-only at section
+   level** (F17, F22, F31).
+9. **Query prep before search** (F15); **filter localised dupes and dedupe** (F14).
+10. **Denoise retrieved text** (F8).
+11. **Terse contract, `max_tokens` ≈ 160, no refusal escape hatch** (F8, F9).
+12. **Emptiness detected in the harness** (F9).
+13. **Positive phrasing only** (F7).
+14. **Print the source** — book · article · sections.
+15. **Never answer factual questions from weights** (F5, F21).
+16. **Autotune threads only after measuring it matters** for the shipping model (F3).
+17. **Enforce grounding in code, not by asking the model** — reject any answer
+    proposing a command absent from the reference, or merely restating the question
+    (F27). This buys 2B's only measured advantage for 12 lines.
+18. **Always `--no-mmproj`, and verify model byte size before serving** (F25).
+19. **Split sections on h2–h5 and centre the window on query terms** — coarse h2-only
+    chunks put the answer past the slice budget in a 12.9 KB section (F30, F31).
+20. **Keep conversation history; never let the model rewrite the follow-up query.**
+    History carries the antecedent for elliptical follow-ups (F28); model rewrites
+    inverted the question's meaning (F29). Build the retrieval query as `q1 + " " + q2`.
+
+## F28 — follow-up turns need conversation history (24 samples per arm)
+
+A follow-up is elliptical: "how do I unlock **it** at boot", "how do I remove **one**
+instead". The antecedent is only in the previous turn, so the question is whether to
+keep chat history or to rebuild a stateless prompt from the retrieved reference.
+
+Both arms get the same re-retrieved reference; the stateless arm restates the pair as
+`"<first question> — specifically: <follow-up>"`.
+
+| Arm | Correct | Latency | Prompt tokens |
+|---|---|---|---|
+| **with history** | **20/24 (83 %)** | 29.6 s | 761 |
+| stateless | 18/24 (75 %) | 24.1 s | 381 |
+
+The failure *distribution* decides it, not the 2-point gap: the stateless arm failed
+**4 out of 4** attempts at "how do I unlock it at boot" — it cannot know that "it" is
+an encrypted partition — while history's failures were spread thin. History carries
+the antecedent; a re-retrieved reference does not.
+
+Single runs of this benchmark returned 4/6, 5/6 and 6/6 for the *same* arm, so the
+per-arm scores here are the only trustworthy ones. Prompt-cache reuse also makes
+history cheaper than its token count suggests: `cached_tokens` was 350–440 of a
+700–870-token turn-2 prompt, because turn 1's prefix is still in the KV cache.
+
+**Decision: keep the conversation, append turns, let the prompt cache absorb it.**
+
+## F29 — [WARN] never let the model rewrite the follow-up query
+
+To retrieve for turn 2, the elliptical follow-up must become a standalone query.
+Three ways, scored by whether the right article comes back rank-1:
+
+| Query construction | Right article rank-1 | Cost |
+|---|---|---|
+| raw follow-up alone | 2/6 | free |
+| **concatenate both turns** | **5/6** | **free** |
+| model rewrite (0.8B) | 4/6 | 3.5 s/turn |
+
+The rewrites were not merely worse, they were **semantically inverted**:
+
+- "how do I turn it off again" → `"How do I turn a swap file back on?"`
+- "how do I remove one instead" → `"pacman -S <package-name>"` (that installs)
+- "how do I see only the failed ones" → `"find service --type=systemd --failed | grep -v "Failed"` (invented command)
+
+A query that means the opposite of the question retrieves confidently wrong material,
+which is worse than retrieving nothing. Same lesson as F16: the model must not be put
+in charge of *selection*, and query construction is selection.
+
+**Decision: `q1 + " " + q2`. Free, cannot invert meaning.**
+
+## F30/F31 — section granularity was the real retrieval ceiling
+
+"disable root login over ssh" was unanswerable and it exposed the deepest retrieval
+bug found so far. `PermitRootLogin` lives in OpenSSH's §Protection, and:
+
+- embedding selection ranked §Protection **11 of 41** ("how do I stop root logging
+  in": **36 of 41**) — outside top-3;
+- raising to top-5 and top-8 did **not** fix it (F30);
+- lexical scoring ranked it **1 of 41** — but the answer was *still* missing from the
+  context, because §Protection is a single **12,939-char** h2 chunk and
+  `PermitRootLogin` sits at offset **4,704**, past the 600-char-per-section slice.
+
+Two fixes, both model-free, both in the slicing rather than the scoring:
+
+1. **Split on h2–h5, not h2–h3.** OpenSSH becomes 77 sections of ≤3.4 KB instead of
+   41 of ≤12.9 KB. The target section becomes §Restrict (1,047 chars).
+2. **Centre the window on the query terms**, not on the section start.
+
+Scored on all 14 cases (6 single-turn, 6 follow-up, 2 large-article), identical
+splitting and windowing:
+
+| Selector | Score | Avg context |
+|---|---|---|
+| **embedding, top-3** | **14/14** | **1,488 ch** |
+| lexical, top-3 | 12/14 | 1,639 ch |
+| lexical, top-5 | 14/14 | 2,683 ch |
+
+**A correction I nearly recorded as fact.** An interactive probe scored lexical 14/14
+and embedding 11/14, and I was one step from deleting bge-small from the design. The
+probe scored the *untruncated* section text; the harness scores the 600-char slice the
+model actually receives. Measuring anything other than the bytes that reach the model
+is measuring nothing. At equal context the embedder is 2 cases better, and it reaches
+14/14 in **44 % less context** than lexical needs — and since prefill dominates
+latency here, those tokens cost more than the 35 MB embedder does.
+
+**bge-small stays at section level. At *article* level it still buys nothing**:
+Xapian + lexical RRF = **9/10**, identical to the 3-way embedding fusion of F17, so
+the article stage drops its two embedding calls.
+
+`pickSectionsLex` is kept as the no-server fallback (14/14 at top-5).
+
+## F32 — ground against the source document, not the slice sent to the model
+
+F27's reference was the ~1.5 KB windowed sections. That rejected a **correct** answer:
+"unlock it at boot" cited `cryptsetup`, which the Dm-crypt article contains but the
+slice did not. The false-reject rate was sampling-dependent — the same code produced
+**0, 1 and 3** across three runs — which is the signature of every grounding defect
+found so far.
+
+Both arms, scored on both duties (18 follow-up samples, 6 mismatched contexts):
+
+| Grounding reference | False rejects on correct answers | Fabrications caught |
+|---|---|---|
+| windowed slice | 1 | 6/6 |
+| **full source article** | **0** | **6/6** |
+
+Widening the reference strictly dominates: it loses no safety, because a fabricated
+`ssh-keygen` or `mkfs.ext4` is absent from the whole article too. Self-test is now
+**19/19**, including the pair that pins the distinction — the same answer is grounded
+against the document and ungrounded against the slice alone.
+
+## F33 — [WARN] a benchmark that contradicts itself is reporting a bug, not a result
+
+2B scored **0/6 with 3 false rejects** on follow-ups. That is arithmetically
+impossible: a false reject only counts when the answer was correct. An earlier edit had
+clobbered the two `sc.hist += …` lines, so the counters never incremented. A raw probe
+answered the same question correctly with `/etc/fstab` in the text.
+
+Had the contradiction not been visible in the same output line, "2B collapses on
+follow-ups" would have been recorded as a model finding. `benchFollowup` now throws
+when `falseReject > correct`.
+
+2B on the improved fixture, measured before the bug was found (these two are valid,
+they use separate counters): **answering 6/6 at 13.2 s/answer** (0.8B: 6/6 at
+**10.9 s**), **refusal 5/6 → 6/6 with F27** (0.8B: 4/6 → 6/6). Its follow-up score is
+unmeasured; the decision does not rest on it.
+
+## F34 — cross-book retrieval: routing is worthless even when perfect
+
+Three ZIMs mounted (bash 132 articles, rust 2,983, arch 14,497), 15 queries with an
+unambiguous home book — five per book, each target confirmed rank-1 *within* its own
+book before the fixture was written.
+
+| Arm | Right article rank-1 | Right book rank-1 | Requests | Latency |
+|---|---|---|---|---|
+| oracle — told the correct book | **12/15** | — | 1 | 102 ms |
+| **all books, one query** | **12/15** | **15/15** | **1** | **149 ms** |
+| all books + lexical RRF | 12/15 | 15/15 | 1 | 149 ms |
+| per-book search, RRF across books | 11/15 | 14/15 | 3 | 174 ms |
+
+**The oracle arm is the upper bound, and the all-books query ties it.** Being told the
+correct book in advance buys *nothing*, so no routing stage can help — there is no
+headroom for it to recover. Content picks the corpus: 15/15 right book, unrouted.
+
+Fusing per-book result lists is **worse** (11/15) and costs 3 requests: each book's
+list is scored independently, so a weak book's rank-1 gets promoted to compete with a
+strong book's rank-1. Kiwix's own cross-book scoring already normalises this. Rejected.
+
+Searching three ZIMs instead of one costs **+47 ms**. The 4 remaining misses are
+within-book ranking failures, identical across every arm — the same class as F17's
+"mount a usb drive automatically" → `Netboot`.
+
+**Decision: one `/search` with no `books.name`, no routing stage, no per-book fusion.**
+
+## F35 — kiwix ANDs every query term, so one stray word returns nothing
+
+`string versus str slice` returned **0 hits**. Not a rare-word problem: `versus` has
+hits on its own. Kiwix requires *one document containing every term*, so each extra
+word multiplies the chance of an empty result — and an empty result is a dead tool.
+
+Comparison phrasings are the common trigger, and they are exactly what people type in
+a terminal. Three of six comparison queries returned zero hits.
+
+| Fix | Relevant top-1 | Requests |
+|---|---|---|
+| F15 stopword list only | 0/6 | 6 |
+| **+ comparison words stripped** | **3/6** | **6** |
+| + bounded drop-a-term retry on top | 3/6 | 6 |
+
+Adding `versus|vs|difference|between|tradeoffs|should|or|choose|compare|alternatives`
+to `prep` eliminated **all three** zero-hit cases at **no extra request**:
+`string versus str slice` → `str` first; `pacman versus yay aur helper` →
+`AUR helpers`; `swapfile versus swap partition tradeoffs` → `Swap`.
+
+Two things measured and **rejected**:
+
+- **Xapian `OR` syntax** — unsupported. `/search?pattern=String OR str` treats `OR` as
+  a literal term and returns 0 hits.
+- **A retry loop** that drops trailing terms until hits appear. It never fires once the
+  stopword list is wider, so it is code that cannot earn its keep.
+
+The wider list also lifted F34's book selection from 14/15 to **15/15**, and left F17
+at 9/10. The 3 remaining comparison misses return hits but rank a neighbouring article
+first — the corpus has no single "X vs Y" article, which is a synthesis question this
+design does not attempt.
+
+## F36 — two-article synthesis is unreliable, and one-sided context fabricates
+
+Comparison questions ("ext4 or btrfs") have no single article to answer them. Five
+pairs, both articles' facts verified present in their own retrieved sections first:
+
+| Arm | Result |
+|---|---|
+| both articles in context — mentions both sides' facts | **2/5, then 3/5 on re-run** |
+| only side A in context — invented facts about side B | **2/5** |
+| only side A — declined or was caught | 0/5 → **2/5 after F38** |
+
+Verbatim, with the reference containing *only* systemd-timesyncd and iptables:
+
+- *"chrony is the recommended alternative to systemd-timesyncd…"*
+- *"iptables is the default table for most common use cases…, while nftables is
+  recommended for complex configurations."*
+
+Confident, plausible, and about a tool the model was never shown. **F27 caught
+neither** — there is no command in either sentence, so the command rule cannot see it.
+
+**Decision: do not build synthesis. Ask the user instead (F37).** At 2–3/5 it is not a
+feature, and the one-sided case is a fabrication generator.
+
+## F37 — the ask-the-user trigger, model-free
+
+Split the question at its comparison word, carry the shared tail into **both** sides,
+retrieve each side, and ask only if the two sides resolve to *different* articles.
+
+| Metric | Result |
+|---|---|
+| fires on comparison questions | **6/6** |
+| silent on normal questions | **26/26** |
+| both sides retrieved correctly | 5/7 (2 others returned topical articles) |
+| cost | 2 requests, no model |
+
+The shared tail matters: `["bash", "zsh startup files"]` retrieved a bash-docs *index*
+page for the bare left side, while the right side was correct — the tail was doing the
+work. Splitting to `"bash startup files"` / `"zsh startup files"` fixed it.
+
+Ordering constraint found here: **the split must run before `prep`**, because `prep`
+strips the very comparison words the split needs (F35).
+
+A first version matched a comparison word and then required two retrieved titles to
+contain query terms. It fired on only 4/6, because retrieval on an *unsplit* comparison
+query surfaces neither side. Splitting first is simpler and strictly better.
+
+## F38 — a fabrication class with no command in it
+
+F27 only inspects commands, echoes and questions. F36's fabrications were prose claims
+about an entity that was never retrieved. Both sides' names are already known from the
+question's grammar (F37), so the check stays model-free: **a side named in the answer
+must appear in what was shown to the model.**
+
+This exposed a direct tension with F32. Grounding commands against the *full article*
+removed false rejects — but `chrony` appears in systemd-timesyncd's "See also", so the
+wide reference licensed a claim about it. Resolution: **two references, one check.**
+
+| Check | Reference | Why |
+|---|---|---|
+| command not in reference | full source article (F32) | a neighbouring section legitimately names `cryptsetup` |
+| asserts about the other side | the slice actually shown | "See also: chrony" must not license a recommendation |
+
+Self-test is now **23/23**, including the case where the same answer is grounded
+against the document and ungrounded against the slice.
+
+**Honest limit:** when the other side genuinely appears in the shown slice — the
+Iptables article does mention nftables — a lexical check cannot verify the *claim*, only
+the entity's presence. That case stays uncaught, which is why F37's ask path, not this
+check, is the actual safety mechanism for comparisons.
+
+## F39 — [WARN] article ranking cannot be improved by section evidence
+
+F34's misses were identical across every arm, so the hypothesis was that title+snippet
+is too thin and *section* evidence — the signal that fixed extraction (F31) — should be
+promoted into article ranking. Top-5 candidates refetched and rescored, 25 queries:
+
+| Ranker | Rank-1 correct |
+|---|---|
+| **base: RRF(xapian, lexical title+snippet)** | **21/25** |
+| best single section | 16/25 |
+| whole-article term density | 20/25 |
+| best section − mean section (peakiness) | 15/25 |
+| best section ÷ √sections | 13/25 |
+| RRF(base, best-section) | 21/25 |
+
+All four formulations are worse, and fusion only ties, for **+92 ms and 5 article
+fetches per query**. Index pages win on max-section score: "Bash Documentation" beats
+"Redirections" because many of its sections mention the query's terms.
+
+**Rejected.** Title+snippet plus Xapian order is the ceiling at 84 %.
+
+But the misses are not lost — **3 of 4 sit at rank 2 or 3**:
+
+| Recall | @1 | @2 | @3 | @5 |
+|---|---|---|---|---|
+| of 25 | 21 | 22 | **24** | 24 |
+
+So the fix is to widen, not to rerank — the same lesson as top-3 sections beating
+argmax. Spreading the same budget over the top-3 articles costs almost nothing:
+**3 articles × 1 section = 1,842 ch** versus **1 article × 3 sections = 1,603 ch**, and
+the wide context contains the `udisksctl` answer the narrow one missed.
+
+## F40 — the catalog is the index; suggest a download when the corpus can't answer
+
+`library.kiwix.org` lists **1,286 English ZIMs, 2,773 GB total**, so no index needs
+building — the OPDS catalog *is* the index. Cached as JSON it is **405 KB**, or
+**192 KB** with only the fields the suggester uses.
+
+Matching the question against catalog metadata, docs-category ZIMs only:
+
+| Metric | Result |
+|---|---|
+| suggestions offered | 8/10 questions |
+| **of those, correct ZIM in top-3** | **8/8** |
+| wrong suggestions | **0** |
+| silent when the local corpus answers | **5/5** |
+
+Three matcher lessons, each measured:
+
+1. **Metadata describes the corpus, not its contents.** "what is the capital of
+   Mongolia" cannot match Wikipedia's blurb ("The free encyclopedia"), and "how do I
+   unclog a drain" matches nothing at all. Lexical matching works only for questions
+   naming a *technology*, which is exactly what a ZIM title carries.
+2. **Restrict matching to docs-category ZIMs.** Unrestricted, "capital" matched
+   `ted_mul_capitalism` — the "du in produce" substring bug again. Scoped to devdocs,
+   precision went to 8/8 and the general-knowledge questions correctly fall through.
+3. **Hybrid term rule.** Terms ≥4 chars match as substrings so `postgres` reaches
+   `postgresql`; shorter terms need a word boundary so `git` reaches `devdocs_en_git`
+   without matching "digit". Substring-only scored 8/10, word-boundary-only 7/10
+   (it missed postgres→postgresql), hybrid 8/8 of matched.
+
+For the two that fall through, suggest a fixed general tier rather than pretending to
+match. **`wikipedia_en_top` is 0.3 GB for 875,265 articles** — versus 124 GB for
+`wikipedia_en_all`. That is the sane default; the monolith should never be suggested.
+
+The trigger is the existing failure signal: zero local hits, or a grounding rejection.
+No new detection logic.
+
+## Open questions
+
+- [x] ~~**Is 0.8B the floor?**~~ **Yes, on this fixture.** The Qwen3.5 dense ladder is
+      **0.8B → 2B → 4B → 9B → 27B** (MoE 35B-A3B needs all 35B resident — dead on
+      7.7 GB RAM). 2B measured at 6/6 vs 0.8B's 6/6 for 2.2× the cost, and its one
+      refusal advantage is replaced by F27's regex. **0.8B stays.** Not retested:
+      4B/9B — pointless until a fixture exists that 0.8B actually fails.
+- [ ] **Build a harder fixture.** The 6-case answering benchmark is saturated at 6/6
+      for both models, so it cannot guide further model choice. Needed: multi-fact
+      synthesis, exact-flag questions, and cases whose answer is genuinely absent
+      from the corpus. Until then any "bigger model is better" claim is unmeasurable.
+- [ ] Still untested cheap wins: Qwen3.5-0.8B at **Q4_K_M** (halves RAM — does 6/6
+      survive?), and LFM2.5-350M *fine-tuned* for this one extraction task, the only
+      path back to a ~360 MB answerer.
+- [x] ~~Would a purpose-built embedder beat bge-small?~~ **No** — nomic-embed-text
+      v1.5 (137 M) scored *worse* on articles (F24). Embedder scaling is not the
+      lever; `TNY_EMBED`/`TNY_QP`/`TNY_DP` make re-testing cheap if that changes.
+- [ ] **Section selection**: 6/6 *presence* and now 6/6 *answers*, so it is no longer
+      the measured weak link — but presence is a weak bar. Untried: h4-aware
+      splitting, sentence-window selection, including the article lead with the top-3.
+- [ ] Staleness is inherent to ZIM snapshots — "current stable Rust version" is
+      unanswerable offline. Ship `--online` fallback (Wikipedia + Stack Exchange
+      APIs, keyless, verified working) or accept the limit?
+- [ ] **Stack Exchange ZIM article structure is unverified** (question + answers in
+      one page?). Needed before the code-question path is built.
+- [x] ~~Multi-book search: query all books, or route to one book first?~~ **Query all
+      books, unrouted** (F34). One `/search` ties an oracle told the right book
+      (12/15), picks the right book 15/15, and costs +47 ms. Per-book RRF fusion is
+      worse (11/15) at 3× the requests.
+- [ ] Does `tny` need tool calling at all (F6) if the harness routes deterministically?
+- [ ] Three supervised processes (~1.3 GB RSS) — acceptable, or fold embeddings into
+      the chat server's spare capacity?
+
+## Reproducing
+
+`bun bench/harness.mjs all` with the three servers up. Individual benchmarks:
+`rank` (F17/F31), `judge` (F16), `sections` (F22), `answers` (F20), `corpus` (F21),
+`refuse` (F26/F27), `select` (F31), `cross` (F34), `followup` (F28), `rewrite` (F29),
+`depth` (F30), `thinking` (F19), and `ground` — the F27/F32 self-test, which is pure:
+no servers, no network, exits non-zero on failure. Every helper is exported and the CLI
+only dispatches under `import.meta.main`, so `await import("./bench/harness.mjs")`
+gives `ungrounded`, `pickSections`, `pickSectionsLex`, `rankArticles`, `search`,
+`searchAll`, `article`, `ask`, `embed`, `prep`, `terms`, `lexScore` and `window` for
+ad-hoc probing without rebuilding anything.
+
+Model swap: point `llama-server` at another GGUF on port 8080 and re-run — the
+harness is model-agnostic. Embedder swap: `TNY_EMBED`, `TNY_QP`, `TNY_DP`.
+Always pass `--no-mmproj` (F25).

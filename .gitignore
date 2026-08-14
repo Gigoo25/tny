@@ -1,0 +1,4 @@
+# GGUF weights and the kiwix catalog cache — 4.6 GB, all re-fetchable
+models/
+# ZIM corpora — tens of MB to hundreds of GB, managed by `tny --corpus`
+zim/
