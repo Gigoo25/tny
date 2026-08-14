@@ -762,6 +762,16 @@ fewer candidates to embed; smaller `max_tokens`; 350M for the *selection-only* p
 20. **Keep conversation history; never let the model rewrite the follow-up query.**
     History carries the antecedent for elliptical follow-ups (F28); model rewrites
     inverted the question's meaning (F29). Build the retrieval query as `q1 + " " + q2`.
+21. **Three grounding rules, not one, and each needs its own reference** (F27/F32, F44,
+    F45): commands against the source document, claims about a comparison's other side
+    against the slice actually shown, numbers and identifiers against the document, and a
+    how-to answer must name a command from the reference's vocabulary.
+22. **Build the command vocabulary from `<code>` *and* `<a>` text** (F45). Wikis name
+    tools as links; `<code>` alone gave one article a six-word vocabulary and false-rejected
+    a correct answer.
+23. **Re-run `refuse` on every model or quant swap, never just `answers`** (F43, F46).
+    Accuracy parity has twice concealed a safety regression, because what a deterministic
+    checker catches depends on the *shape* of the model's errors.
 
 ## F28 — follow-up turns need conversation history (24 samples per arm)
 
@@ -1223,6 +1233,105 @@ on this class of machine, not just Q4_K_M.
 
 So the trade is 287 MB of RAM against the grounding check's refusal recovery. Stay Q8_0.
 
+## F44 — detail-level grounding: free, safe, and less powerful than hoped
+
+Targets the most persistent failure in these notes: *headline right, elaboration
+invented*. Rule: **every multi-digit number and code-shaped identifier in the answer must
+appear in the reference.** Numbers compare as digit strings, because the model reformats
+units ("220GB" against a reference saying "220G"). Single digits are exempt — they are
+usually enumeration ("three files").
+
+| Measurement | Result |
+|---|---|
+| recorded fabrications caught | **3/3** — invented version+date, `--keyring` flag, `/dev/mapper/x` |
+| false rejects, ZIM answers | **0/11** |
+| false rejects, pastes | **0/5** |
+| wrong answers caught *live* | **0** |
+
+So it is **free** — it never fires on a correct answer across 16 samples — but its value
+is demonstrated only on recorded fabrications. The two live failures in that run happened
+to contain no invented numbers or identifiers. Keep it (zero cost, catches a class F27
+cannot see), but do not claim it as a live catcher yet.
+
+**What it cannot do.** Two recorded fabrications are invisible to it:
+
+- *"220GB out of its 209GB available space"* — both numbers are in the reference; the
+  fabrication is the *relationship* between them.
+- *"`&mut v` in the loop"* — no loop exists, but "loop" is prose, not an identifier.
+  Catching that needs claim verification, not token matching.
+
+**One defect, same class as always.** The flag pattern `--?[\w-]{2,}` matched
+`-contained` inside "self-**contained**" and rejected a correct answer. Fixed with a left
+boundary. That is the third time a pattern here has been bitten by ordinary prose, after
+`du` matching inside "produce" and the word-overlap ratio of F27.
+
+## F45 — the commandless-prose rule, and two defects that only a weak model exposed
+
+F27 inspects commands, so an answer containing none is invisible to it. That is exactly
+how Q4_K_M evaded it (F43). Rule: **if the question asks how to do something and the
+answer names no command, it is not an answer.** Refusals are exempt — declining is the
+behaviour the check exists to encourage.
+
+Unit cases pass 9/9, including four that must *not* fire: "why did this fail" (diagnosis),
+"what does this say about disk usage" (reading output), "what is a mutex" (conceptual),
+and "how many neurons…" ("how many" is not "how to").
+
+**Defect 1: it measured formatting, not grounding.** The first version looked for
+*marked-up* commands in the answer — backticks, fences, `$`/`#` lines. Qwen-0.8B always
+uses backticks, so it looked perfect. LFM2.5-350M writes bare prose, "Use timedatectl
+set-timezone", which F27 explicitly allows — and F45 **rejected 3/3 of 350M's correct
+answers**. Only re-testing a weaker model exposed it.
+
+Fixed by matching against the reference's own command vocabulary instead of markup.
+
+**Defect 2: `<code>` is not where wikis keep tool names.** Core_utilities yields a
+six-word code vocabulary — `rm mv cp arch kill ln` — and names `ncdu`, `gdu`, `dust`,
+`dua-cli` only as wiki **links**. So a correct "du alternatives include ncdu, gdu…"
+answer was still rejected. Vocabulary now includes single-token `<a>` text (112 entries
+for that article instead of 6).
+
+After both fixes, verified in both directions: **0/6 false rejects on 0.8B** and the
+catch on 350M is undiminished at **6/6 safe**.
+
+## F46 — the safety net holds as the model degrades; the answers do not
+
+Re-tested the small models now that retrieval and the rules had improved. Retrieval
+improvements could not help them — their failures were measured with the needle *already
+present* — so this was a test of the **rules**, not the corpus.
+
+| Model | Size | Correct | Refuses alone | +F27 | +F44/F45 | Decode |
+|---|---|---|---|---|---|---|
+| **Qwen3.5-0.8B Q8_0** | 784 MiB | **6/6** | 4/6 | 6/6 | **6/6** | 7.8 t/s |
+| LFM2.5-350M Q8_0 | 359 MiB | 3–4/6 | 1/6 | 1–2/6 | **6/6** | 20.5 t/s |
+| LFM2.5-230M Q8_0 | 233 MiB | 1/6 | **0/6** | 4/6 | **6/6** | 29.5 t/s |
+
+**230M refuses nothing on its own and still ends up 6/6 safe.** Model-side judgement
+collapses as size falls; the deterministic rules do not. The rules, not the model, are
+what make this safe to point at a shell.
+
+Note the crossover: F27 alone rescues 230M better (4/6) than 350M (1–2/6), because 230M
+fabricates *commands* — catchable — while 350M emits content-free prose that needs F45.
+
+**Output quality, verbatim, same question and context:**
+
+| Question | 0.8B | 350M |
+|---|---|---|
+| mount a usb automatically | "Use `udiskie` … via the `udiskie-dmenu` interface." | "Use `bashmount` to mount a removable USB drive." ✗ |
+| encrypt a partition | "use `cryptsetup luksFormat` with the `-s` flag…" | "encrypt a partition" ✗ (echo) |
+| generate an ssh key | "…`ssh-keygen` with the `-t ed25519-sk` option…" | "generate an ssh key with the ssh-keygen(1) command." |
+| check disk space | "du alternatives include cdu, dua-cli, dust, gdu, ncdu…" | "Check the disk usage with `gdu`." |
+
+350M's signature: question-echo prefixes, man-page artifacts (`ssh-keygen(1)`,
+`mkswap(8)`), and plausible-but-wrong tools. **Decision: 0.8B stays.** 2.6× faster decode
+does not pay for 6/6 → 3–4/6, but 350M is now a *safe* fallback for hardware that cannot
+host 0.8B — it declines rather than fabricates.
+
+**0.8B's own quality is not clean either.** Two of its six correct answers carry wrong
+details: `-s` is cryptsetup's *key-size* flag, not a partition size, and `ed25519-sk`
+requires FIDO2 hardware. F44 cannot catch either, because both flags appear in the source
+article. The needle-based fixture scores these as correct, which is a further argument for
+the stricter fixture F41 demands.
+
 ## Exploration backlog — speed
 
 The cost model, measured (0.8B Q8_0, 4 threads, this CPU):
@@ -1352,15 +1461,22 @@ Current ceilings, measured: article recall@1 **21/25**, recall@3 **24/25**, end-
 
 `bun bench/harness.mjs all` with the three servers up. Individual benchmarks:
 `rank` (F17/F31), `judge` (F16), `sections` (F22), `answers` (F20), `corpus` (F21),
-`refuse` (F26/F27), `select` (F31), `cross` (F34), `rerank`/`widen` (F39), `file` (F41),
-`stdin` (F42), `followup` (F28), `rewrite` (F29), `depth` (F30), `synth` (F36),
-`clarify` (F37), `thinking` (F19), and `ground` — the F27/F32/F38 self-test, which is
-pure: no servers, no network, exits non-zero on failure. Every helper is exported and
-the CLI only dispatches under `import.meta.main`, so `await import("./bench/harness.mjs")`
-gives `ungrounded`, `pickSections`, `pickSectionsLex`, `rankArticles`, `search`,
-`searchAll`, `article`, `ask`, `embed`, `prep`, `terms`, `lexScore`, `window`,
-`splitCompare`, `needsClarify`, `fileWindows` and `structChunks` for ad-hoc probing
-without rebuilding anything.
+`refuse` (F26/F27/F44/F45), `select` (F31), `cross` (F34), `rerank`/`widen` (F39),
+`file` (F41), `stdin` (F42), `detail` (F44), `followup` (F28), `rewrite` (F29),
+`depth` (F30), `synth` (F36), `clarify` (F37), `thinking` (F19), and `ground` — the
+F27/F32/F38/F44 self-test, which is pure: no servers, no network, exits non-zero on
+failure.
+
+`bun bench/quality.mjs "<label>"` dumps verbatim answers for whatever model is on port
+8080; that is how F46's quality comparison was made, and it is the only way to see the
+wrong-detail failures a needle scores as correct.
+
+Every helper is exported and the CLI only dispatches under `import.meta.main`, so
+`await import("./bench/harness.mjs")` gives `ungrounded`, `ungroundedDetail`,
+`ungroundedShape`, `commandsIn`, `commandVocab`, `pickSections`, `pickSectionsLex`,
+`rankArticles`, `search`, `searchAll`, `article`, `ask`, `embed`, `prep`, `terms`,
+`lexScore`, `window`, `splitCompare`, `needsClarify`, `fileWindows` and `structChunks`
+for ad-hoc probing without rebuilding anything.
 
 Model swap: point `llama-server` at another GGUF on port 8080 and re-run — the harness
 is model-agnostic. **Re-run `refuse`, not just `answers`**: Q4_K_M matched Q8_0 on

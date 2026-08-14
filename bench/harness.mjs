@@ -102,26 +102,69 @@ const LOCALISED = /\((Magyar|Deutsch|Español|Français|Português|Italiano|Pols
 // comparison must be supported by what was shown: `chrony` appears in
 // systemd-timesyncd's "See also", which was enough to license "chrony is the
 // recommended alternative" under the wider reference.
+// a command reaches us three ways: inline `cmd`, a fenced block, or a prompt line
+// ("# timedatectl set-timezone"). Missing the third made the echo rule misfire on a
+// correct answer — 1 false reject in 18 samples before this was widened. Paths are not
+// commands: an answer quoting `/home/username/.ssh/id_ed25519` was falsely rejected
+// because the reference spells that example differently.
+export function commandsIn(text) {
+  const code = [
+    ...[...text.matchAll(/```[\w]*\s*([\s\S]*?)```/g)].map(m => m[1]),
+    ...[...text.matchAll(/`([^`\n]+)`/g)].map(m => m[1]),
+    ...[...text.matchAll(/^\s*[$#]\s+(.+)$/gm)].map(m => m[1]),
+  ];
+  return [...new Set(code
+    .flatMap(s => s.split("\n"))
+    .map(l => l.trim().replace(/^[$#]\s*/, "").split(/[\s|;]+/)[0])
+    .filter(c => c.length >= 2 && /^[\w.-]+$/.test(c)))];
+}
+
+// F45: the commandless-prose blind spot. F27 only inspects commands, so an answer with
+// none is invisible to it — which is exactly how Q4_K_M evaded it (F43): asked how to
+// check disk space against a mismatched reference, it produced "open your file explorer
+// or command prompt and navigate to the C…". Windows prose, no command, undetected.
+//
+// Rule: if the question asks *how to do* something, and the reference demonstrates
+// commands, then an answer containing no command is not an answer. Refusals are exempt —
+// declining is the correct behaviour the check exists to encourage.
+const HOWTO = /^(how (do|can|would) i|how to|what command)\b|^(create|set|mount|encrypt|generate|check|list|install|enable|configure|disable|remove|start|stop|make)\b/i;
+// Takes the reference's own command vocabulary, because the check must be about content,
+// not formatting. First version only looked for *marked-up* commands in the answer and
+// false-rejected 3/3 of LFM2.5-350M's correct answers — it writes "Use timedatectl
+// set-timezone" without backticks, which F27 explicitly allows. 0.8B hid the bug by
+// always using backticks.
+export function ungroundedShape(answer, ref, q, refCmds = []) {
+  const a = answer.replace(/<think>[\s\S]*?<\/think>/g, "").trim();
+  if (!a || /not found/i.test(a)) return "";        // empty and refusal are F27's business
+  if (!HOWTO.test(q.trim())) return "";             // "why did this fail" may be prose
+  if (commandsIn(a).length) return "";              // marked-up command present
+  if (!refCmds.length) return "";                   // no vocabulary supplied: cannot judge
+  // a bare mention of any command the reference demonstrates counts as an answer
+  const mentions = refCmds.some(c => new RegExp(`(?<![\\w-])${c.replace(/[.*+?^${}()|[\]\\/-]/g, "\\$&")}(?![\\w-])`, "i").test(a));
+  return mentions ? "" : "how-to answer names no command from the reference";
+}
+
+// The reference document marks its own commands up; html2txt throws that away, so pull
+// the vocabulary from the raw HTML before stripping tags.
+//
+// `<code>` alone is not enough: Core_utilities has just 6 code tokens
+// (rm mv cp arch kill ln) and names ncdu/gdu/dust/dua-cli only as wiki *links*, so a
+// correct "du alternatives include ncdu, gdu…" answer was false-rejected. Link text is
+// therefore included, single lowercase tokens only.
+export function commandVocab(html) {
+  const code = [...html.matchAll(/<(?:code|kbd|pre)[^>]*>([\s\S]*?)<\/(?:code|kbd|pre)>/gi)]
+    .map(m => html2txt(m[1]).trim().replace(/^[$#]\s*/, "").split(/[\s|;]+/)[0]);
+  const links = [...html.matchAll(/<a[^>]*>([^<]{2,40})<\/a>/g)].map(m => m[1].trim());
+  return [...new Set([...code, ...links].filter(c => c.length >= 2 && /^[a-z][\w.-]*$/.test(c)))];
+}
+
 export function ungrounded(answer, ref, q, seen = ref) {
   const a = answer.replace(/<think>[\s\S]*?<\/think>/g, "").trim();
   if (!a) return "empty";
   // word-boundary match, NOT substring: `du` must not be satisfied by "produce",
   // and a 2-char filter would drop du/df/ls/ip — the commands asked about most
   const inRef = c => new RegExp(`(?<![\\w-])${c.replace(/[.*+?^${}()|[\]\\/-]/g, "\\$&")}(?![\\w-])`).test(ref);
-  // a command reaches us three ways: inline `cmd`, a fenced block, or a prompt line
-  // ("# timedatectl set-timezone"). Missing the third made the echo rule misfire on a
-  // correct answer — 1 false reject in 18 samples before this was widened.
-  const code = [
-    ...[...a.matchAll(/```[\w]*\s*([\s\S]*?)```/g)].map(m => m[1]),
-    ...[...a.matchAll(/`([^`\n]+)`/g)].map(m => m[1]),
-    ...[...a.matchAll(/^\s*[$#]\s+(.+)$/gm)].map(m => m[1]),
-  ];
-  const cmds = [...new Set(code
-    .flatMap(s => s.split("\n"))
-    .map(l => l.trim().replace(/^[$#]\s*/, "").split(/[\s|;]+/)[0])
-    // paths are not commands: an answer quoting `/home/username/.ssh/id_ed25519` was
-    // falsely rejected because the reference spells that example differently
-    .filter(c => c.length >= 2 && /^[\w.-]+$/.test(c)))];
+  const cmds = commandsIn(a);
   const absent = cmds.filter(c => !inRef(c));
   // F38: a comparison answer may assert about a tool whose article was never
   // retrieved — "chrony is the recommended alternative", with chrony absent from the
@@ -147,6 +190,79 @@ export function ungrounded(answer, ref, q, seen = ref) {
     if (/^[^.!]*\?\s*$/.test(a)) return "asks a question back";
   }
   return "";
+}
+
+// F44: detail-level grounding. The most persistent failure in these notes is "headline
+// right, elaboration invented": a fabricated Rust release date, an invented `--keyring`
+// flag, "&mut v in the loop" where no loop exists. F27 only inspects commands, so none
+// of that is visible to it.
+//
+// Rule: every multi-digit number and every code-shaped identifier in the answer must
+// appear in the reference. Numbers are compared as digit strings, because the model
+// reformats units ("220GB" against a reference that says "220G").
+// The flag pattern needs a left boundary: without it, "self-contained" yielded the
+// fragment "-contained" and false-rejected a correct answer. Same class as `du` matching
+// inside "produce" (F27) — every pattern here has now been bitten by prose once.
+const DETAIL_ID = /(?:(?<![\w-])--?[\w-]{2,}|[\w.]*(?:::|_|\/)[\w./:-]+|\b[a-z]+[A-Z]\w+)/g;
+export function ungroundedDetail(answer, ref) {
+  const a = answer.replace(/<think>[\s\S]*?<\/think>/g, "");
+  const inRef = s => ref.toLowerCase().includes(s.toLowerCase());
+  // single digits are usually enumeration ("three files", "step 2"), not claims
+  const nums = [...new Set((a.match(/\d[\d.,]*/g) || []).map(s => s.replace(/[.,]$/, "")))]
+    .filter(s => s.replace(/\D/g, "").length >= 2);
+  const badNums = nums.filter(x => !inRef(x) && !inRef(x.replace(/[.,]/g, "")));
+  if (badNums.length) return `number not in reference: ${badNums.join(", ")}`;
+  const ids = [...new Set((a.match(DETAIL_ID) || []).map(s => s.replace(/[.,)]+$/, "")))]
+    .filter(s => s.length >= 3 && !/^https?/.test(s));
+  const badIds = ids.filter(x => !inRef(x));
+  if (badIds.length) return `identifier not in reference: ${badIds.join(", ")}`;
+  return "";
+}
+
+// F44: the rule is only shippable if it does not reject correct answers. Measured on the
+// two live fixtures, sampled, because every grounding defect so far surfaced only under
+// sampling (F27 reported "0 false rejects" three times while broken).
+export async function benchDetail(reps = 2) {
+  console.log("== F44 detail-level grounding: false rejects on correct answers ==");
+  const ctx = await buildContexts();
+  let n = 0, ok = 0, fr = 0, caught = 0;
+  const reasons = [];
+  for (let r = 0; r < reps; r++) {
+    for (const c of ctx) {
+      const { content } = await ask([
+        { role: "system", content: SYS },
+        { role: "user", content: `Reference:\n${c.text}\n\nQuestion: ${c.q}` },
+      ], { temperature: 0.3 });
+      n++;
+      const hit = c.needle.test(content);
+      ok += hit ? 1 : 0;
+      // F32: reference is the source document, not the slice
+      const why = ungroundedDetail(content, c.full ?? c.text);
+      if (hit && why) { fr++; reasons.push(`FALSE REJECT [${why}] ${c.q}\n      ${content.slice(0, 150).replace(/\n/g, " ")}`); }
+      if (!hit && why) caught++;
+    }
+  }
+  console.log(`  ZIM answers: ${ok}/${n} correct | detail-rule false rejects ${fr}/${ok} | wrong answers it caught ${caught}`);
+  for (const r of reasons) console.log(`      ${r}`);
+
+  // pastes are a harder test: the reference is ~288 chars, so there is far less
+  // vocabulary for a legitimate paraphrase to match
+  let pn = 0, pok = 0, pfr = 0, pcaught = 0;
+  const pr = [];
+  for (const [q, paste, needle, label] of STDIN_CASES) {
+    const { content } = await ask([
+      { role: "system", content: "Diagnose the pasted output. Be concise: at most two sentences naming the specific cause." },
+      { role: "user", content: `${paste}\n\nQuestion: ${q}` },
+    ], { temperature: 0.3 });
+    pn++;
+    const hit = needle.test(content);
+    pok += hit ? 1 : 0;
+    const why = ungroundedDetail(content, paste);
+    if (hit && why) { pfr++; pr.push(`FALSE REJECT [${why}] ${label}\n      ${content.slice(0, 150).replace(/\n/g, " ")}`); }
+    if (!hit && why) pcaught++;
+  }
+  console.log(`  pastes: ${pok}/${pn} correct | detail-rule false rejects ${pfr}/${pok} | wrong answers it caught ${pcaught}`);
+  for (const r of pr) console.log(`      ${r}`);
 }
 
 // ---------------------------------------------------------------- services
@@ -358,7 +474,8 @@ export async function buildContexts() {
     const s = await pickSections(html, q, 3, 600);
     // F32: `full` is what the grounding check measures against — the source document,
     // not the slice. The slice rejected a correct answer for citing `cryptsetup`.
-    out.push({ q, needle, heads: s.heads, text: s.text, full: html2txt(html), has: needle.test(s.text) });
+    // F45 needs the document's command vocabulary, which html2txt destroys
+    out.push({ q, needle, heads: s.heads, text: s.text, full: html2txt(html), vocab: commandVocab(html), has: needle.test(s.text) });
   }
   return out;
 }
@@ -915,7 +1032,11 @@ async function benchAnswers(ctx) {
     ]);
     t += Date.now() - t0;
     const hit = c.needle.test(content);
-    const ug = ungrounded(content, c.full ?? c.text, c.q); // F27/F32: source doc, not slice
+    // F27/F32 command+echo rule, F44 detail rule, F45 shape rule — all must stay silent
+    // on a correct answer; a false reject turns a good answer into "not found"
+    const ug = ungrounded(content, c.full ?? c.text, c.q)
+      || ungroundedDetail(content, c.full ?? c.text)
+      || ungroundedShape(content, c.text, c.q, c.vocab);
     ok += hit ? 1 : 0;
     if (hit && ug) falseReject++;
     console.log(`  ${hit ? "OK" : "x "} ${c.q}${error ? ` [${error}]` : ""}${ug ? ` [F27 would reject: ${ug}]` : ""}\n      ${content.slice(0, 150).replace(/\n/g, " ")}`);
@@ -971,7 +1092,7 @@ const SYS_REFUSE = SYS + " If the reference material does not contain the answer
 async function benchRefuse(ctx) {
   console.log("== F26 refusal on mismatched context (want: refuse all, fabricate none) ==");
   ctx ??= await buildContexts();
-  let refused = 0, safe = 0, n = 0, t = 0;
+  let refused = 0, safe = 0, safeAll = 0, n = 0, t = 0;
   for (let i = 0; i < ctx.length; i++) {
     const q = ctx[i].q, c = ctx[(i + 1) % ctx.length];
     if (ctx[i].needle.test(c.text)) continue; // skip if the answer leaked in anyway
@@ -985,11 +1106,15 @@ async function benchRefuse(ctx) {
     const no = /not found/i.test(content);
     // F32: the mismatched context came from c's article, so that article is the source
     const ug = ungrounded(content, c.full ?? c.text, q);
+    const det = ungroundedDetail(content, c.full ?? c.text);
+    const shp = ungroundedShape(content, c.text, q, c.vocab);
     refused += no ? 1 : 0;
-    safe += (no || ug) ? 1 : 0; // F27 catches what the model failed to decline
-    console.log(`  ${no ? "OK" : ug ? "F27" : "x  "} ${q}  [ctx §${c.heads[0]}]${ug && !no ? ` -> caught: ${ug}` : ""}\n      ${content.slice(0, 140).replace(/\n/g, " ")}`);
+    safe += (no || ug) ? 1 : 0;                       // F27 alone
+    safeAll += (no || ug || det || shp) ? 1 : 0;      // + F44 detail + F45 shape
+    const why = ug || det || shp;
+    console.log(`  ${no ? "OK" : ug ? "F27" : det ? "F44" : shp ? "F45" : "x  "} ${q}  [ctx §${c.heads[0]}]${why && !no ? ` -> caught: ${why}` : ""}\n      ${content.slice(0, 140).replace(/\n/g, " ")}`);
   }
-  console.log(`  model refused ${refused}/${n} | with F27 grounding check ${safe}/${n} | ${(t / n / 1000).toFixed(1)}s per answer`);
+  console.log(`  model refused ${refused}/${n} | +F27 ${safe}/${n} | +F44 detail +F45 shape ${safeAll}/${n} | ${(t / n / 1000).toFixed(1)}s per answer`);
 }
 
 // F28: does a follow-up turn need conversation history, or is a re-retrieved
@@ -1151,8 +1276,30 @@ const GROUND_CASES = [
     "F38: both sides present in the reference is fine"],
 ];
 
+// F44 detail rule and F45 shape rule: [mustCatch, ref, question, answer, vocab, label]
+const DETAIL_CASES = [
+  [1, "The current stable version is 1.97.1, released on 2026-08-12.", "what version",
+    "The current stable version is 4.0.0, released on 2026-07-16.", [], "F44: invented version and date"],
+  [1, "Encrypt a partition using cryptsetup luksFormat /dev/sdX.", "encrypt a partition",
+    "Encrypt with `cryptsetup --keyring /dev/mapper/x`.", [], "F44: invented flag and path"],
+  [0, "ssh-keygen -t ed25519 creates a key pair.", "generate an ssh key",
+    "Use `ssh-keygen` with `-t ed25519` for a secure, self-contained key pair.", [], "F44: hyphenated prose is not a flag"],
+  [0, "Filesystem Size Used Avail Use%\n/dev/mapper/root 220G 209G 1.2G 99% /", "what does this say",
+    "The root filesystem is 99% full, with only 1.2G available.", [], "F44: real numbers pass"],
+  [1, "Set the timezone with timedatectl set-timezone Europe/London.", "how do I set the system timezone",
+    "You can change it from your desktop environment's date and time settings panel.", ["timedatectl"], "F45: how-to with no command"],
+  [0, "Set the timezone with timedatectl set-timezone Europe/London.", "how do I set the system timezone",
+    "Use timedatectl set-timezone to change it.", ["timedatectl"], "F45: bare command counts, no backticks needed"],
+  [0, "du alternatives: ncdu, gdu, dust.", "check what is using disk space",
+    "du alternatives include dust, gdu, and ncdu.", ["du", "ncdu", "gdu", "dust"], "F45: vocabulary from links, not just code"],
+  [0, "Set the timezone with timedatectl set-timezone Europe/London.", "how do I set the system timezone",
+    "not found", ["timedatectl"], "F45: refusal is exempt"],
+  [0, "The adult hermaphrodite has 302 neurons.", "how many neurons does C. elegans have",
+    "It has 302 neurons.", ["wc"], "F45: 'how many' is not 'how to'"],
+];
+
 function benchGround() {
-  console.log("== F27 grounding check self-test (pure, no servers) ==");
+  console.log("== F27/F32/F38/F44/F45 grounding self-test (pure, no servers) ==");
   let bad = 0;
   for (const [mustCatch, ref, q, ans, label] of GROUND_CASES) {
     const r = ungrounded(ans, ref, q);
@@ -1160,6 +1307,14 @@ function benchGround() {
     if (!ok) bad++;
     console.log(`  ${ok ? "ok  " : "FAIL"} ${mustCatch ? "catch" : "allow"}: ${label}${r ? ` -> ${r}` : ""}`);
   }
+  for (const [mustCatch, ref, q, ans, vocab, label] of DETAIL_CASES) {
+    const r = ungroundedDetail(ans, ref) || ungroundedShape(ans, ref, q, vocab);
+    const ok = !!r === !!mustCatch;
+    if (!ok) bad++;
+    console.log(`  ${ok ? "ok  " : "FAIL"} ${mustCatch ? "catch" : "allow"}: ${label}${r ? ` -> ${r}` : ""}`);
+  }
+  const n = GROUND_CASES.length + DETAIL_CASES.length;
+  console.log(`  ${n - bad}/${n} correct`);
   if (bad) process.exitCode = 1;
 }
 
@@ -1178,6 +1333,7 @@ if (import.meta.main) {
   else if (cmd === "widen") await benchWiden();
   else if (cmd === "file") await benchFile();
   else if (cmd === "stdin") await benchStdin();
+  else if (cmd === "detail") await benchDetail();
   else if (cmd === "followup") await benchFollowup();
   else if (cmd === "rewrite") await benchRewrite();
   else if (cmd === "depth") await benchDepth();
