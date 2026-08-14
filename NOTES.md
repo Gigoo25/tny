@@ -1208,8 +1208,109 @@ Windows-flavoured prose with **no command token in it**, so the command rule can
 and quantisation changes that shape.** Any future quant swap must re-run `refuse`, not
 just `answers` — accuracy parity hid a real safety regression.
 
-Latency is not a factor either way: 17.4 s here versus 10.9–20 s for Q8_0 across runs,
-which is machine load, not the quant.
+**Nor is it faster.** The harness numbers (17.4 s vs 10.9–20 s) were useless — different
+machine load — so both quants were benchmarked back-to-back on an idle box:
+
+| Model | Size | pp512 | tg64 |
+|---|---|---|---|
+| **Q8_0** | 784 MiB | 40.55 ± 1.29 t/s | **7.82 ± 0.05 t/s** |
+| Q4_K_M | 497 MiB | 41.54 ± 0.53 t/s | 7.71 ± 0.11 t/s |
+
+Identical inside the error bars: +2 % prefill, −1 % decode. **37 % fewer weight bytes
+buys no speed, so decode on this CPU is compute-bound in dequantisation and the BLAS
+path, not memory-bandwidth-bound.** That kills the whole "smaller quant for speed" idea
+on this class of machine, not just Q4_K_M.
+
+So the trade is 287 MB of RAM against the grounding check's refusal recovery. Stay Q8_0.
+
+## Exploration backlog — speed
+
+The cost model, measured (0.8B Q8_0, 4 threads, this CPU):
+
+```
+prefill  40.55 t/s  ->  25 ms per input token
+decode    7.82 t/s  -> 128 ms per output token
+search   149 ms (all ZIMs)   fetch ~90 ms   embed ~1 call/query
+```
+
+So a query costs roughly `25ms × context_tokens + 128ms × answer_tokens`. A 1,500-char
+context (~400 tok) plus a 40-token answer is **~15 s**, and both terms are worth attacking.
+
+Ordered by expected payoff, each with the measurement that would settle it:
+
+1. **Skip the model entirely when the answer is one command.** The boldest lever: if the
+   selected sections contain exactly one command matching the question's verb, print it
+   with its citation and generate nothing. **Saves the whole 10–20 s** for a large class
+   of queries. F27's extractor already finds commands in text, so the machinery exists.
+   Measure: on the answer fixture, how often does the extracted command equal the model's
+   answer? If it is high, the model becomes the *fallback*, not the default path.
+2. **Cap answer length harder.** At 128 ms/token, every sentence costs ~2 s. Answers ran
+   23–51 tokens against a 160 cap. Measure one-sentence prompting against accuracy — it
+   also targets the detail-fabrication failure (F42), so it may buy both.
+3. **Thread count is probably mistuned.** The very first sweep (1.2B) peaked at **3
+   threads** for decode — 11.09 t/s at `-t 3` versus 9.72 at `-t 4` — because the 4th
+   thread contends with the OS. Never re-measured for 0.8B. Free if it holds: sweep
+   `-t 2,3,4` × `--poll 0,50`, plus `-fa on`.
+4. **Speculative decoding.** llama.cpp takes `--model-draft`; LFM2.5-230M Q8_0 (233 MiB)
+   is already on disk and shares nothing architecturally, so a Qwen3.5 draft would be
+   needed. Typical 1.5–2× on decode. Measure acceptance rate before believing it.
+5. **Trim context, not just answers.** 14/14 held at 1,488 chars (F31); nobody has tried
+   800. Each 400 chars removed saves ~2.5 s of prefill. Measure presence and answers at
+   400/600/800 per section.
+6. **Sentence-level windows instead of 600-char blocks.** Smaller context and less
+   irrelevant text to fabricate from. Doubles as an accuracy lever.
+7. **Prompt-cache the system prefix across queries.** Follow-ups already reuse 350–440
+   tokens (F28). A fresh query only shares the ~40-token system prompt. Ordering is
+   already correct (stable text first); measure whether a longer stable preamble that
+   ends up cached is net cheaper than a short uncached one.
+8. **Smaller quants are a dead end here** — F43 proved decode is compute-bound, so
+   Q4/Q3 buy RAM, never speed.
+
+## Exploration backlog — accuracy
+
+Current ceilings, measured: article recall@1 **21/25**, recall@3 **24/25**, end-to-end
+**5/6**, refusal **6/6** with the check, comparison detection **6/6**.
+
+1. **A fixture worth trusting comes first.** Six cases cannot rank two options — `file`
+   scored 3/6 and 5/6 on the *same arm at the same budget*, and two needles were
+   satisfied by garbage (`/command|restat|question/` matched "command, restat, and
+   question questions"; `/ntp/i` matched a dump of `ntp.org`). Needed: 25–40 cases,
+   exact-answer expectations, absent-answer cases, and repeated runs. **Every accuracy
+   claim below is unmeasurable until this exists.**
+2. **Detail-level grounding — the highest-value idea here.** The recurring failure across
+   the whole session is *headline right, elaboration invented*: "`&mut v` in the loop"
+   (no loop exists), "220GB out of 209GB available", fabricated Rust release dates,
+   invented Yaccarino tenure. A deterministic rule catches this class: **every number and
+   identifier in the answer must appear in the reference.** Cheap, model-free, and it
+   targets the one failure mode nothing has yet touched. Measure false-reject rate first,
+   by sampling — that is how F27's three defects were found.
+3. **Commandless-prose rule.** F38 and F43 share a blind spot: an answer with no command
+   cannot be checked against commands. If the question is imperative ("how do I X") and
+   the reference contains commands but the answer contains none, that is suspicious.
+   Would have caught Q4_K_M's "open your file explorer" and closed the F43 regression.
+4. **Retry once on rejection instead of surrendering.** Grounding failure currently means
+   "not found". Re-asking with the next-best sections costs one call (~15 s) and may
+   convert a refusal into an answer. Measure the conversion rate against the false-answer
+   rate it introduces.
+5. **Widen to top-3 articles at fixed budget.** Recall@3 (24/25) far exceeds recall@1
+   (21/25), and end-to-end went 4/6 → 5/6 for +140 chars. Confirm on the bigger fixture;
+   it is the cheapest accuracy win identified.
+6. **Anchor route for API questions.** The one total retrieval miss ("Box dyn Error trait
+   object") had the right article absent from all 8 candidates. F13 proved
+   `suggest → path → #anchor` works (240 anchors in `std/vec/struct.vec`) but it is only
+   used for pages already known to be reference docs. Measure it as a *router*: for
+   API-shaped questions, does the anchor route beat FTS outright?
+7. **Retrieval for error codes.** F42's only miss was not knowing exit **137** means
+   OOM-killed, with both "137" and "Killed" in context. Test whether a corpus lookup
+   keyed on the error token rescues it — the general question being whether pastes should
+   also trigger retrieval.
+8. **Section-level lexical fusion, reconsidered.** F31 chose embeddings on a 14-case
+   fixture where lexical needed top-5 for the same score. On the OpenSSH cases lexical
+   ranked the target 1st while embeddings ranked it 11th and 36th. On a larger fixture the
+   ordering may flip — and lexical needs no server.
+9. **Better comparison-side retrieval.** Split retrieval got both sides 5/7; the misses
+   returned topical-but-not-target articles. Worth revisiting once the ask-the-user flow
+   is real, since it decides what the user is offered.
 
 ## Open questions
 
@@ -1268,3 +1369,33 @@ Embedder swap: `TNY_EMBED`, `TNY_QP`, `TNY_DP`. Always pass `--no-mmproj` (F25).
 
 One model server at a time — two at `-t 4` on a 4-core box makes the machine unusable
 (see Benchmark hygiene).
+
+### Runtime cost of each benchmark, measured
+
+Model calls dominate everything. At ~7.8 tok/s decode and ~40 tok/s prefill, one answer
+costs 10–35 s depending on context size, so a benchmark's runtime is just its call count
+times that. Budget accordingly — and prefer the free ones when iterating.
+
+| Command | Runtime | Model calls |
+|---|---|---|
+| `ground` | **0.4 s** | 0 — pure, run this constantly |
+| `clarify` | 2 s | 0 |
+| `cross` | 7 s | 0 |
+| `rerank` | 13 s | 0 |
+| `rank` | 30 s | 0 |
+| `stdin` | 65 s | 6 |
+| `refuse` | 90 s | 6 |
+| `answers` | 110 s | 6 |
+| `select` | 165 s | 0 (embedder only) |
+| `file` | 120–230 s | 6 |
+| `synth` | 220–340 s | 10 |
+| `followup` | 275 s | 18 |
+| `widen` | **610 s** | 12 |
+| `all` | **~15 min** | ~60 |
+
+Two rules that came out of this:
+
+1. **Score deterministic arms model-free, then spend calls on the winner.** This turned
+   `file` from 18 calls into 6 with no loss of information.
+2. **A 6-case fixture cannot rank two options.** `file` scored 3/6 and 5/6 on the *same
+   arm at the same budget*. Either sample repeatedly or do not claim a difference.
