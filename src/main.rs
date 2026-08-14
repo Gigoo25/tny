@@ -36,6 +36,12 @@ const TOP_SECTIONS: usize = 5;
 const PER_SECTION: usize = 600;
 // F58: the answer is in the top-1 article for 36/58 cases and in the top-3 for 45/58.
 const TOP_ARTICLES: usize = 3;
+// F63: hits per book. Deeper costs nothing — one request per book either way, just a longer
+// response — and it lifts the recall ceiling from 54/58 to 55/58 (`Hippocampus` answers
+// "how does the brain consolidate long term memory" from its book's 6th hit). 12 adds nothing
+// further, and neither 8 nor 12 disturbs the ranking: article@1 and answer@3 are unmoved, so
+// the extra candidates are inert rather than noise.
+const PER_BOOK: usize = 8;
 
 const NEED_LLAMA: &str = "llama-server not on PATH. Install llama.cpp:\n  \
     arch:   pacman -S llama.cpp\n  \
@@ -244,7 +250,7 @@ fn run(cfg: &Cfg, question: &str, follow: bool) -> Result<i32, String> {
     let books = corpus::local(&cfg.zim);
     if let Some((a, b)) = split_compare(&retrieval_q) {
         let one = |s: &str| {
-            let c = search_union(&cfg.kiwix, &prep(s), &books, 3);
+            let c = search_union(&cfg.kiwix, &prep(s), &books, PER_BOOK);
             rank_articles(s, &c).into_iter().next()
         };
         let (ha, hb) = (one(&a), one(&b));
@@ -259,7 +265,7 @@ fn run(cfg: &Cfg, question: &str, follow: bool) -> Result<i32, String> {
     let t = Instant::now();
     let query = prep(&retrieval_q);
     // F49: ask every book, then rank — one global query buries a small book's answer.
-    let cands = search_union(&cfg.kiwix, &query, &books, 5);
+    let cands = search_union(&cfg.kiwix, &query, &books, PER_BOOK);
     let t_search = t.elapsed();
     if cands.is_empty() {
         return Ok(no_local_match(cfg, &query));

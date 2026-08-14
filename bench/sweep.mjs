@@ -87,6 +87,12 @@ const V = {
   // The grid winner: title hits at *2 not *3, and Xapian's within-book rank at /5 not /100.
   // Sits on a plateau (rank 4-5, cover 3-4 all score the same) and gains in every fixture.
   tuned: (c, t, q) => baseW(c, t, 2) + cover(c, t) * 3 + prior(c, t, q) - c.rank / 5,
+  // F62: the two intent defects, measured apart and together.
+  strictWhy: (c, t, q) => baseW(c, t, 2) + cover(c, t) * 3 + priorWith(DIAG_STRICT, false)(c, t, q) - c.rank / 5,
+  concept: (c, t, q) => baseW(c, t, 2) + cover(c, t) * 3 + priorWith(DIAG_SHIP, true)(c, t, q) - c.rank / 5,
+  both: (c, t, q) => baseW(c, t, 2) + cover(c, t) * 3 + priorWith(DIAG_STRICT, true)(c, t, q) - c.rank / 5,
+  // and with the title weight the snippet grid liked
+  bothT1: (c, t, q) => baseW(c, t, 1) + cover(c, t) * 3 + priorWith(DIAG_STRICT, true)(c, t, q) - c.rank / 5,
   // Is the entity bonus earning its keep at all?
   noCover: (c, t, q) => base(c, t) + prior(c, t, q) - c.rank / 100,
   // Trust Xapian's within-book confidence more than a hundredth of a point.
@@ -152,15 +158,29 @@ function coverGated(c, t, w) {
   for (let i = 1; i < w.length; i++) if (w[i] > w[hi]) hi = i;
   return c.title.toLowerCase().includes(t[hi] ?? "") ? s : 0;
 }
-const isDiagnose = q => /\b(error|fail|failed|failing|refused|denied|cannot|can't|won't|broken|no such|not found|timed? ?out|exit code|permission)\b/i.test(q);
-const isHowto = q => /^(how (do|can|would) i|how to|what command)\b|^(create|set|mount|encrypt|generate|check|list|install|enable|configure|disable|remove|start|stop|make)\b/i.test(q.trim());
+
+// F62: a *diagnostic* "why" carries an error token — "why is ssh connection refused". A bare
+// "why is the sky blue" is curiosity, and classifying it as diagnosis boosts Q&A threads over
+// the encyclopedia article that answers it. `DIAG_STRICT` drops the bare-why alternative;
+// the rest of the vocabulary still catches every real diagnosis.
+const ERRW = String.raw`error|errors|fail|failed|failing|refused|denied|cannot|can't|won't|does ?n't|broken|no such|not found|timed? ?out|exit code|permission`;
+const DIAG_SHIP = new RegExp(String.raw`\b(${ERRW}|why (is|are|does|do|did|would|am|can't))\b`, "i");
+const DIAG_STRICT = new RegExp(String.raw`\b(${ERRW})\b`, "i");
+// A concept question wants the article about the thing, not a thread discussing it.
+const CONCEPT = /^(what|who|when|where) (is|are|was|were|does|do|did)\b|^what.*\bmade of\b/i;
+const HOWTO = /^(how (do|can|would) i|how to|what command)\b|^(create|set|mount|encrypt|generate|check|list|install|enable|configure|disable|remove|start|stop|make)\b/i;
 const kindOf = c => c.kind === "Qa" ? "qa" : c.kind === "Index" ? "index" : "article";
-function prior(c, t, q = "") {
+
+// intent priors, parameterised so the two defects can be measured apart
+const priorWith = (diag, concept) => (c, t, q = "") => {
   const k = kindOf(c);
-  if (isHowto(q) && k === "qa") return -2;
-  if (isDiagnose(q) && k === "qa") return 1;
+  if (k !== "qa") return 0;
+  if (diag.test(q)) return 1;
+  if (HOWTO.test(q.trim())) return -2;
+  if (concept && CONCEPT.test(q.trim())) return -2;
   return 0;
-}
+};
+const prior = priorWith(DIAG_SHIP, false);
 
 // ---------------------------------------------------------------- scoring
 function evaluate(score) {
@@ -182,13 +202,14 @@ function evaluate(score) {
     if (titleRe.test(ranked[0].title)) art++;
     const body = i => cache.text[`${ranked[i]?.book}\u0000${ranked[i]?.path}`] ?? "";
     const hit = i => needleRe.test(body(i));
-    if (hit(0)) ans1++;
-    if ([0, 1, 2].some(hit)) { ans3++; per[set][0]++; }
-    if ([0, 1, 2, 3, 4].some(hit)) ans5++;
-    // The ceiling: is the answer anywhere in what retrieval returned? A scorer cannot beat
-    // this, and the gap between answer@3 and this is the only headroom ranking owns.
-    if (ranked.some((_, i) => hit(i))) any++;
-    else misses.push([set, q, "ABSENT", ranked[0].title]);
+    // Where the answer sits decides which lever applies: a needle at rank 3-7 is a scoring
+    // problem, one nowhere in the list is a candidate-generation problem.
+    const at = ranked.findIndex((_, i) => hit(i));
+    if (at === 0) ans1++;
+    if (at >= 0 && at < 3) { ans3++; per[set][0]++; }
+    if (at >= 0 && at < 5) ans5++;
+    if (at >= 0) any++;
+    if (at < 0 || at > 2) misses.push([set, q, at < 0 ? "ABSENT" : `rank${at}`, ranked[0].title]);
   }
   const shape = Object.entries(per).map(([k, [a, b]]) => `${k} ${a}/${b}`).join(" ");
   return { art, ans1, ans3, ans5, any, n, misses, per: shape };
@@ -235,5 +256,35 @@ if (process.argv.includes("--grid")) {
   rows.sort((a, b) => b.ans3 - a.ans3 || b.art - a.art);
   for (const r of rows.slice(0, 14)) {
     console.log(`rank/${String(r.rk).padEnd(4)} cover*${r.cv} title*${r.ti}  article@1 ${String(r.art).padStart(2)}  answer@1 ${String(r.ans1).padStart(2)}  @3 ${String(r.ans3).padStart(2)}  @5 ${String(r.ans5).padStart(2)}  ${r.per}`);
+  }
+}
+
+// ---------------------------------------------------------------- snippet grid
+// F62: every remaining failure is a synonym gap — `Sodium chloride` for "table salt",
+// `Rayleigh scattering` for "why is the sky blue", `Mollusca` for "shell in biology". The
+// title shares no term with the question, so no title scorer can reach them. But kiwix's
+// snippet is the passage that matched, and the synonym evidence lives there. This sweeps how
+// much the snippet is worth against the title.
+if (process.argv.includes("--snip")) {
+  const rows = [];
+  for (const ti of [0, 1, 2, 3]) {
+    for (const bo of [1, 2, 3, 4, 6, 8]) {
+      for (const cv of [0, 1, 3]) {
+        const fn = (c, t, q) => {
+          const title = c.title.toLowerCase();
+          const tw = (title.match(/[a-z0-9_.:+-]{2,}/g) ?? []).length || 1;
+          const th = t.filter(w => title.includes(w)).length;
+          const body = denoise(c.snip).toLowerCase().slice(0, 400);
+          const bh = t.filter(w => body.includes(w)).length;
+          return (th * ti) / Math.sqrt(tw) + (bh * bo) / Math.max(t.length, 1)
+            + cover(c, t) * cv + prior(c, t, q) - c.rank / 5;
+        };
+        rows.push({ ti, bo, cv, ...evaluate(fn) });
+      }
+    }
+  }
+  rows.sort((a, b) => b.ans3 - a.ans3 || b.art - a.art);
+  for (const r of rows.slice(0, 12)) {
+    console.log(`title*${r.ti} snip*${r.bo} cover*${r.cv}  article@1 ${String(r.art).padStart(2)}  answer@1 ${String(r.ans1).padStart(2)}  @3 ${String(r.ans3).padStart(2)}  @5 ${String(r.ans5).padStart(2)}  ${r.per}`);
   }
 }

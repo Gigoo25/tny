@@ -1587,6 +1587,132 @@ Book routing (48/58) is not the wall, and the model is not the wall. **Ranking i
 the two named signals — generic-parent titles and near-duplicate Q&A titles — are lexical,
 model-free, and measurable in 110 s per iteration.
 
+## F56 — an offline scorer sweep, and the weights were wrong
+
+Every live ranking measurement costs ~100 s (58 queries × 16 books of kiwix search), which is
+too slow to search a weight space — and slow enough that one bad idea (IDF weighting, 23/58
+against 32/58) cost 15 minutes to disprove. `bench/sweep.mjs` dumps the candidates once via
+`tny --dump` and caches every candidate article's text, then scores a variant in **~1 s**.
+
+It reproduces the shipping scorer exactly (32/58 article@1, 43/58 answer@3), so it is a
+faithful stand-in, not an approximation. Two metrics: `article@1`, and `answer@3` — is the
+verified answer text inside one of the three articles tny actually sends the model. The second
+is the one that predicts quality; the first is a proxy for it.
+
+A grid over title weight × entity weight × rank divisor put **every one of the top 14
+configurations at title × 2**, not the shipping × 3, and at rank ÷ 5, not ÷ 100:
+
+| | article@1 | answer@1 | answer@3 | answer@5 |
+|---|---|---|---|---|
+| shipping | 32/58 | 35 | 43 | 49 |
+| title×2, rank÷5 | **36/58** | **37** | **47** | 49 |
+
+The win is a **plateau**, not a spike — title 2 × cover 3–4 × rank 4–5 all score alike — it
+gains in all four fixtures rather than one, and the configuration chosen on a 13-book corpus
+still won after three more books were mounted. That is the only cross-validation available at
+58 cases, and it is why this is shippable where a single-point maximum would not be.
+
+## F57 — one truncated ZIM took down every query
+
+A dead mirror left a 376 KB fragment of a 237 MB book under its final name. `kiwix-serve`
+refuses to mount **its whole library** when one file is unreadable, so every query failed with
+`did not come up within 120s` while 15 good books sat on disk. Resume needs those bytes to
+survive, so they now live at `.zim.part`, which the mount glob cannot see, and are renamed
+only on a verified byte count. A short file already under the final name is *moved back* to
+`.part`, not deleted — migration and de-poisoning are the same operation.
+
+## F58 — the navigation filter was deleting the answer
+
+`NAV_PATH` was unanchored: `/tags?/` matched devdocs'
+`engine/reference/commandline/tag/index`, so **`docker tag` was classified as a Stack Exchange
+tag-index page and dropped from every candidate list** — the exact article the question named.
+Verified against the mounted ZIMs, these pages only ever appear at the path root
+(`questions/tagged/bash`), so the patterns are now anchored. Worth +1 on every metric, and a
+unit test pins both directions because this was invisible for the project's whole life.
+
+## F59 — the remaining ranking failures are synonym gaps, and lexical cannot reach them
+
+Once the weights were right, the failure list stopped being a list of bugs and became one
+coherent class. The right article's title shares **zero terms** with the question:
+
+| question | right article | wrong winner |
+|---|---|---|
+| chemical formula of table salt | `Sodium chloride` | `Why do all particles have the same influence on osmosis?` |
+| why is the sky blue | `Rayleigh scattering` | `Sky Blue Sky` (Wilco album) |
+| perform CPR on an adult | `Cardiopulmonary resuscitation` | `Is hands-only CPR as effective as traditional CPR?` |
+| propagate a plant from cuttings | `Vegetative reproduction` | `Why some plants can be propagated from a leaf cutting…` |
+| kernel in corn | `Maize` | `Are corn kernels considered a grain` |
+| shell in biology | `Mollusca` | `Bioperl` |
+| cookie made of | `Biscuit` | `Dillo` |
+
+The decomposition is unambiguous. `Rayleigh scattering` scores **0.80** with **zero title
+hits**; `Sky Blue Sky` scores 7.81 because all three of its title words appear in the query.
+Body hits cannot break the tie: kiwix only *returns* pages containing the terms, so "the
+snippet contains the query terms" is nearly constant across candidates and carries almost no
+information. A grid over the snippet weight confirmed it — answer@3 never moved off 46.
+
+Three model-free repairs were measured and **all failed**:
+
+- **snippet weight** (1–8 against title 0–3): answer@3 capped at 46.
+- **`opensearch:totalResults` per book** as a specificity prior: the 875k-article general
+  Wikipedia reports `total=5` for "sky blue" while the physics book reports 300. Not usable.
+- **`<b>` match markers** as term frequency: they *reward* the failure — `Sky Blue Sky` has 12
+  bold markers to `Rayleigh scattering`'s 2.
+
+This is the textbook limit of lexical retrieval, not a defect to fix. The four surviving cases
+of this class sit at ranks 14–19, while the other four sit at ranks 3–4 and are reachable by
+widening the article count. **The semantic step is the model's job** — it reads the articles —
+or an embedder's, which F39 measured as no better than lexical for sections and which would
+add a second supervised process.
+
+## F60 — deeper per-book retrieval is free
+
+`PER_BOOK` 5 → 8 lifts the recall ceiling 54/58 → 55/58 and costs **nothing**: it is one
+request per book either way, only a longer response. `Hippocampus` answers "how does the brain
+consolidate long term memory" from its book's 6th hit. 12 adds nothing further, and neither 8
+nor 12 moves article@1 or answer@3 — the extra candidates are inert, not noise, which is the
+evidence that the scorer is stable rather than luckily tuned.
+
+## F61 — the proxy is not the product
+
+Every benchmark up to here measured whether retrieval *put* the answer in the context.
+`bench/answer-cli.mjs` measures whether `tny "question"` **prints a correct answer**, over all
+58 cases, and the grader is derived mechanically from the fixture's own verified needle rather
+than from hand-written expected answers: the largest number in the needle when it has one,
+its rarest words otherwise. Validated 11/11 against my own reading of real output, and it
+catches exactly the failure that matters — answers that read as grounded but are not:
+
+```
+article says 115 known moons        ->  "Jupiter has 95 known moons."
+article says fell on 9 November 1989 -> "The Berlin Wall fell on November 9, 2009."
+```
+
+Both are fluent, confident, and wrong, and no retrieval metric can see either. Three outcomes
+are reported, because the difference between the last two is the whole purpose of the
+grounding rules: **correct**, **refused** (safe), **wrong** (not).
+
+A methodological failure worth recording: the first run of this benchmark was invalid because
+I rebuilt the binary while it was in flight, so early cases used a different configuration
+from later ones. An end-to-end run is a measurement of one build, and nothing may touch that
+build while it runs.
+
+## F62 — co-occurrence is not comparison evidence, so the clarify prompt stays
+
+Two questions in the QA fixture route to F37's clarify prompt instead of an answer:
+"difference between symbolic and hard links" and "SIGTERM vs SIGKILL". The notes flagged this
+as a suspected over-fire, since both are answerable from a single page, so I tested the obvious
+repair: if one article's text mentions **both** sides, answer from it and skip the clarify.
+
+It fails, and the failure is instructive. Of 24 candidates checked for the link question, the
+two that mention both are `pg_combinebackup` and `pg_upgrade` — PostgreSQL tooling. For the
+signal question, **all 24 of 24** mention both, led by `git fast-import`, `Atrium`, and
+`Keyboard shortcuts (Русский)`. Every one is incidental co-occurrence, not an explanation.
+
+Same shape as the snippet-weight result in F59: presence of a term is not evidence about the
+term. Answering from `pg_combinebackup` would be a confident wrong answer; asking which side
+the user means is safe. **The clarify prompt is correct behaviour and stays**, and these two
+cases are scored as refusals rather than errors.
+
 ## Exploration backlog — speed
 
 The cost model, measured (0.8B Q8_0, 4 threads, this CPU):
