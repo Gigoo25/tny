@@ -448,6 +448,43 @@ mod tests {
     use super::*;
 
     #[test]
+    fn apparatus_sections_never_win_a_slot() {
+        // F63: `References` is a wall of article titles, so it matches query terms by density
+        // and beat the prose; Wikipedia repeats the head, so it took two of five slots. The
+        // answer then came from `§20th anniversary celebrations` — an event held in 2009 — for
+        // "when did the berlin wall fall".
+        // `sections_of` drops any section under 80 characters, so each body is real prose.
+        let cite = "<p>Berlin wall fall Berlin wall fall Berlin wall fall archived from the \
+                    original Berlin wall fall retrieved Berlin wall fall press release</p>";
+        let html = format!(
+            "<h2>References</h2>{cite}\
+             <h2>Fall</h2><p>The Berlin wall fell on 9 November 1989 after the announcement \
+             that crossings would be permitted, and crowds crossed that evening.</p>\
+             <h2>References</h2>{cite}\
+             <h2>See also</h2>{cite}"
+        );
+        let html = html.as_str();
+        let p = pick_sections(html, "when did the berlin wall fall", 3, 600);
+        assert!(!p.heads.iter().any(|h| h == "References"), "apparatus section selected: {:?}", p.heads);
+        assert!(!p.heads.iter().any(|h| h == "See also"), "apparatus section selected: {:?}", p.heads);
+        assert!(p.heads.iter().any(|h| h == "Fall"), "lost the prose section: {:?}", p.heads);
+        assert!(p.text.contains("1989"), "the answer is not in the sent text: {}", p.text);
+    }
+
+    #[test]
+    fn section_heads_are_deduped() {
+        // One head must not take two slots and spend the budget twice on identical text.
+        let html = "<h2>Usage</h2><p>To create a swap file of a chosen size, allocate it, set \
+                    its permissions, and format it before enabling. Alpha variant text.</p>\
+                    <h2>Usage</h2><p>To create a swap file of a chosen size, allocate it, set \
+                    its permissions, and format it before enabling. Beta variant text.</p>\
+                    <h2>Notes on swap</h2><p>A swap file must not be sparse, so create it with \
+                    a tool that writes real blocks rather than reserving a hole.</p>";
+        let p = pick_sections(html, "how do I create a swap file", 3, 600);
+        assert_eq!(p.heads.iter().filter(|h| *h == "Usage").count(), 1, "duplicate head: {:?}", p.heads);
+    }
+
+    #[test]
     fn nav_filter_never_eats_command_pages() {
         // F61: `/tags?/` unanchored matched devdocs' command reference and deleted the very
         // page the question named. Both directions must hold, on real paths from the ZIMs.
