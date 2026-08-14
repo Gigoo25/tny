@@ -259,13 +259,17 @@ fn run(cfg: &Cfg, question: &str, follow: bool) -> Result<i32, String> {
         return Ok(no_local_match(cfg, &query));
     }
     let ranked = rank_articles(&retrieval_q, &cands);
-    let best = &ranked[0];
     // Retrieval is 2 % of a query's wall time, so measuring ranking through full generation
-    // costs 80 s per case and hides the thing under test. `--rank` stops here.
+    // costs 80 s per case and hides the thing under test. `--rank` stops here and prints the
+    // whole shortlist, because rank-1 alone cannot distinguish a scoring miss from a
+    // candidate that was never retrieved (F49's actual lesson).
     if cfg.rank_only {
-        println!("{}\t{}", best.book, best.title);
+        for c in ranked.iter().take(8) {
+            println!("{}\t{}\t{}", c.book, c.title, c.path);
+        }
         return Ok(0);
     }
+    let best = &ranked[0];
 
     let t = Instant::now();
     let html = article(&cfg.kiwix, &best.book, &best.path)?;

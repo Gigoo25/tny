@@ -272,11 +272,15 @@ fn title_covered(c: &Candidate, t: &[String]) -> f64 {
         return 0.0;
     }
     let joined = t.join(" ");
-    if words.iter().all(|w| joined.contains(w)) {
-        1.0
-    } else {
-        0.0
+    if !words.iter().all(|w| joined.contains(w)) {
+        return 0.0;
     }
+    // F54: a subset test alone promotes the most GENERIC article. "Docker" is one word,
+    // present in "docker image tag for a registry", so it collected the full entity bonus
+    // and beat the page that answers the question — same for `Plant`, `Ocean`, `Memory`,
+    // `PostgreSQL`. Scale by the share of the question the title actually accounts for: a
+    // title naming 2 of 4 query terms is twice the entity match of one naming 1 of 4.
+    words.len() as f64 / t.len().max(1) as f64
 }
 
 /// A how-to question wants instructions, and a Q&A title that is itself a question is not

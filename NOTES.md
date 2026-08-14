@@ -1545,6 +1545,48 @@ passage matched, which the body no longer tells you.
 Closed: content-based reranking. The remaining ranking headroom is in title/entity signals
 and page kind, not in reading more text.
 
+## F54 — the entity bonus was promoting the most generic article
+
+`title_covered` gave a flat +3 when every word of a title appeared in the query. A one-word
+title satisfies that trivially, so **`Docker`, `PostgreSQL`, `Ocean`, `Plant`, `Memory`,
+`Chemical compound`** collected the full bonus for covering a quarter of the question and
+beat the article that answers it. Scaling the bonus by the share of the query the title
+accounts for (`title terms / query terms`) recovered **+1 case of 58** — real, but it proves
+the bonus was not the whole story: those generic pages also win on snippet terms.
+
+## F55 — measuring the binary, not a JS re-implementation
+
+`bench/rank-cli.mjs` runs `tny --rank`, which stops after ranking and prints the shortlist.
+Retrieval is 2 % of a query's wall time, so measuring through generation cost 80 s per case
+and hid the thing under test; `--rank` measures all 58 cases in 110 s. Four fixtures,
+58 verified cases (18 instructional, 14 Q&A, 16 general knowledge, 10 ambiguous-term):
+
+| metric | result |
+|--------|--------|
+| right book @1 | **48/58** |
+| right article in top-8 shortlist | **47/58** |
+| right article @1 | **33/58** |
+| **answer present in the fetched article** | **36/58** |
+
+The last row is the only one a user experiences: the answering stage reads the article, not
+its title, and three cases answer correctly from an article the fixture calls wrong
+(`Burmese python` for reticulated-python prey, a Q&A thread for `useradd`). Conversely
+`Penicillin` at rank 1 does *not* satisfy the Fleming needle.
+
+**The 25 misses split three ways, and they need opposite fixes:**
+
+- **14 scoring** — right article at rank 2–5, retrieved and then out-ranked. 8 of them at
+  rank 2. This is where the headroom is: 47/58 recall against 33/58 at rank 1.
+- **9 absent** from the shortlist — candidate generation, at 5 per book. Not a scorer problem.
+- **2 by design** — "difference between symbolic and hard links" and "SIGTERM vs SIGKILL"
+  route to F37's clarify prompt, which retrieves nothing. F37 measured 0/26 false fires, but
+  that fixture had no comparison question a *single* article answers. Both of these are
+  answerable from one page, so the trigger is now over-firing on a class it never saw.
+
+Book routing (48/58) is not the wall, and the model is not the wall. **Ranking is**, and
+the two named signals — generic-parent titles and near-duplicate Q&A titles — are lexical,
+model-free, and measurable in 110 s per iteration.
+
 ## Exploration backlog — speed
 
 The cost model, measured (0.8B Q8_0, 4 threads, this CPU):
