@@ -34,6 +34,8 @@ const MODEL_DIR: &str = "models--ggml-org--Qwen3.5-0.8B-GGUF";
 // F31: lexical section selection needs top-5 × 600 chars for 14/14.
 const TOP_SECTIONS: usize = 5;
 const PER_SECTION: usize = 600;
+// F58: the answer is in the top-1 article for 36/58 cases and in the top-3 for 45/58.
+const TOP_ARTICLES: usize = 3;
 
 const NEED_LLAMA: &str = "llama-server not on PATH. Install llama.cpp:\n  \
     arch:   pacman -S llama.cpp\n  \
@@ -53,23 +55,26 @@ struct Cfg {
     models: PathBuf,
     cache: PathBuf,
     verbose: bool,
-    /// Retrieval only: print `book<TAB>title` and stop, for measuring ranking without
+    /// Retrieval only: print the shortlist and stop, so ranking is measurable without
     /// paying 21 s of generation per case (bench/rank-cli.mjs).
     rank_only: bool,
+    /// Dump every retrieved candidate as JSON and stop, for offline scorer sweeps.
+    dump: bool,
 }
 
 fn main() {
     let mut question = String::new();
     let mut verbose = false;
     let mut rank_only = false;
+    let mut dump = false;
     let mut follow = false;
     let mut corpus_args: Option<Vec<String>> = None;
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
         match a.as_str() {
-            "-v" | "--verbose" => verbose = true,
-            "-f" | "--follow" => follow = true,
             "--rank" => rank_only = true,
+            "--dump" => dump = true,
+            "-f" | "--follow" => follow = true,
             "--corpus" => corpus_args = Some(args.by_ref().collect()),
             "-h" | "--help" => {
                 usage();
@@ -88,7 +93,7 @@ fn main() {
         }
     }
 
-    let cfg = match config(verbose, rank_only) {
+    let cfg = match config(verbose, rank_only, dump) {
         Ok(c) => c,
         Err(e) => {
             eprintln!("tny: {e}");
@@ -130,7 +135,7 @@ fn usage() {
     );
 }
 
-fn config(verbose: bool, rank_only: bool) -> Result<Cfg, String> {
+fn config(verbose: bool, rank_only: bool, dump: bool) -> Result<Cfg, String> {
     let home = std::env::var("HOME").map_err(|_| "HOME is not set")?;
     let xdg_data = std::env::var("XDG_DATA_HOME").unwrap_or(format!("{home}/.local/share"));
     let xdg_cache = std::env::var("XDG_CACHE_HOME").unwrap_or(format!("{home}/.cache"));
@@ -153,6 +158,7 @@ fn config(verbose: bool, rank_only: bool) -> Result<Cfg, String> {
         cache,
         verbose,
         rank_only,
+        dump,
     })
 }
 
@@ -220,7 +226,7 @@ fn corpus_cmd(cfg: &Cfg, args: &[String]) -> Result<i32, String> {
 
 fn run(cfg: &Cfg, question: &str, follow: bool) -> Result<i32, String> {
     let t_all = Instant::now();
-    serve(cfg)?;
+    serve_kiwix(cfg)?;
 
     let prev = if follow { last_turn(cfg) } else { None };
     // F29: the retrieval query is `<prev question> <this question>`. NEVER a model rewrite:
@@ -269,17 +275,65 @@ fn run(cfg: &Cfg, question: &str, follow: bool) -> Result<i32, String> {
         }
         return Ok(0);
     }
+    if cfg.dump {
+        // Every candidate, unranked, as JSON: lets a scorer be tried offline in
+        // milliseconds instead of a 100-second run against live kiwix per variant.
+        let rows: Vec<serde_json::Value> = cands
+            .iter()
+            .map(|c| {
+                serde_json::json!({
+                    "book": c.book, "title": c.title, "path": c.path, "snip": c.snip,
+                    "rank": c.rank, "kind": format!("{:?}", c.kind),
+                })
+            })
+            .collect();
+        println!("{}", serde_json::to_string(&rows).unwrap_or_default());
+        return Ok(0);
+    }
+    // Only now is the model needed: everything above is retrieval.
+    serve_chat(cfg)?;
     let best = &ranked[0];
 
+    // F58: three articles, not one. Rank-1 carries the answer for 36 of 58 verified cases,
+    // but the top *three* carry it for 45 — retrieval's misses are near-misses, and a
+    // ranking gap of 9 cases is closed by fetching 2 more articles at 15-41 ms each rather
+    // than by a better scorer (F53 closed content reranking; F56 exhausted lexical signals).
+    // F39b measured the same shape at the section level: 3 articles x 1 section beat
+    // 1 article x 3 sections, 5/6 vs 4/6.
     let t = Instant::now();
-    let html = article(&cfg.kiwix, &best.book, &best.path)?;
+    let mut docs: Vec<(&retrieve::Candidate, String)> = Vec::new();
+    for c in ranked.iter().take(TOP_ARTICLES) {
+        match article(&cfg.kiwix, &c.book, &c.path) {
+            Ok(html) => docs.push((c, html)),
+            Err(e) if docs.is_empty() => return Err(e),
+            Err(_) => {}
+        }
+    }
     let t_fetch = t.elapsed();
 
-    let picked = pick_sections(&html, &retrieval_q, TOP_SECTIONS, PER_SECTION);
+    // The budget is split, not multiplied: the same ~3 KB of context, sourced from three
+    // articles. F41 measured that a bigger window does not buy accuracy — placement does.
+    let per_doc = TOP_SECTIONS.div_ceil(docs.len().max(1));
+    let mut parts = Vec::new();
+    let mut heads = Vec::new();
+    for (c, html) in &docs {
+        let p = pick_sections(html, &retrieval_q, per_doc, PER_SECTION);
+        if p.text.trim().is_empty() {
+            continue;
+        }
+        // Name the source inline: with three articles in context the model must be able to
+        // attribute, and the grounding check compares against the union below.
+        parts.push(format!("## {}\n{}", c.title, p.text));
+        heads.extend(p.heads);
+    }
+    let picked = retrieve::Picked { heads, text: parts.join("\n\n") };
+
     // F32: grounding reads the whole article, not the slice sent to the model — the slice
-    // rejected a correct answer for citing `cryptsetup` from a neighbouring section.
-    let full = html2txt(&html);
-    let vocab = command_vocab(&html);
+    // rejected a correct answer for citing `cryptsetup` from a neighbouring section. With
+    // three sources the reference is the union of all three, or a correct answer taken from
+    // the second article would be rejected as ungrounded.
+    let full = docs.iter().map(|(_, h)| html2txt(h)).collect::<Vec<_>>().join("\n");
+    let vocab = docs.iter().flat_map(|(_, h)| command_vocab(h)).collect::<Vec<_>>();
 
     let t = Instant::now();
     let answer = ask(cfg, question, &picked.text, prev.as_ref())?;
@@ -318,6 +372,9 @@ fn run(cfg: &Cfg, question: &str, follow: bool) -> Result<i32, String> {
 
     if !why.is_empty() {
         eprintln!("tny: rejected — {why}");
+        // F57: a rejection means the mounted corpora did not carry this answer. That is the
+        // one moment a download suggestion is certainly not noise.
+        suggest_corpus(cfg, &query);
         println!("not found");
         return Ok(3);
     }
@@ -326,12 +383,16 @@ fn run(cfg: &Cfg, question: &str, follow: bool) -> Result<i32, String> {
     Ok(0)
 }
 
-/// F40: the catalog is the index. When the local corpus has nothing, a lexical match over
-/// catalog metadata names the right ZIM for 8/8 such queries — and it cannot misfire on
-/// answerable questions, because this path is only reached on zero hits.
-fn no_local_match(cfg: &Cfg, query: &str) -> i32 {
-    println!("not found");
-    eprintln!("tny: no local corpus matched {query:?} ({} mounted)", corpus::local(&cfg.zim).len());
+/// F40/F57: the catalog is the index — 1,286 English ZIMs, cached locally at 1.5 MB, so a
+/// suggestion costs a file read and no network. A lexical match over catalog metadata names
+/// the right ZIM for 8/8 queries the local corpus cannot answer, with 0 false suggestions on
+/// 5 it can.
+///
+/// Two triggers, both a *measured* failure signal rather than a guess: zero retrieved
+/// candidates, and a grounding rejection. The second was specified in F40 and never wired —
+/// "not found" is precisely the moment the user needs to know which corpus would have held
+/// the answer.
+fn suggest_corpus(cfg: &Cfg, query: &str) {
     match corpus::cached(&cfg.cache) {
         Some(entries) => {
             let hits = corpus::suggest(&entries, query, 3);
@@ -344,6 +405,12 @@ fn no_local_match(cfg: &Cfg, query: &str) -> i32 {
         }
         None => eprintln!("     tny --corpus search {query}   (fetches the library catalog)"),
     }
+}
+
+fn no_local_match(cfg: &Cfg, query: &str) -> i32 {
+    println!("not found");
+    eprintln!("tny: no local corpus matched {query:?} ({} mounted)", corpus::local(&cfg.zim).len());
+    suggest_corpus(cfg, query);
     3
 }
 
@@ -396,7 +463,11 @@ fn on_path(bin: &str) -> bool {
 
 /// Reuse a live server, else spawn it. F25: `--no-mmproj` always — without it llama.cpp
 /// downloads a vision projector nobody uses.
-fn serve(cfg: &Cfg) -> Result<(), String> {
+///
+/// Split in two because retrieval does not need the model: `--rank` measures ranking on a
+/// machine with no llama.cpp at all, and demanding it there cost a 15-minute benchmark run
+/// that reported 0/58 for a missing PATH entry.
+fn serve_kiwix(cfg: &Cfg) -> Result<(), String> {
     if !up(&format!("{}/", cfg.kiwix)) {
         let zims: Vec<PathBuf> = std::fs::read_dir(&cfg.zim)
             .into_iter()
@@ -419,6 +490,10 @@ fn serve(cfg: &Cfg) -> Result<(), String> {
         spawn(cmd, cfg, "kiwix")?;
         wait_up(&format!("{}/", cfg.kiwix), 120, "kiwix-serve")?;
     }
+    Ok(())
+}
+
+fn serve_chat(cfg: &Cfg) -> Result<(), String> {
 
     if !up(&format!("{}/health", cfg.chat)) {
         if !on_path("llama-server") {

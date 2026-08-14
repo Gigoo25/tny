@@ -28,9 +28,10 @@ const text = async (book, path) => {
   return (await r.text()).replace(/<[^>]+>/g, " ").replace(/&[a-z]+;/g, " ").replace(/\s+/g, " ");
 };
 
-let art = 0, bk = 0, rec = 0, ans = 0, n = 0;
-const misses = [], unanswered = [];
-for (const [set, query, , wantBook, titleRe, needleRe] of cases) {
+// 13 corpora x 58 queries is 754 kiwix searches; serial that is 15 minutes and the loop
+// stops being usable. Four at a time on a 4-core box, which is what tny itself would face
+// under any real concurrent use.
+const one = async ([set, query, , wantBook, titleRe, needleRe]) => {
   const p = Bun.spawn(["./target/release/tny", "--rank", query], { stdout: "pipe", stderr: "pipe" });
   const out = await new Response(p.stdout).text();
   await new Response(p.stderr).text();
@@ -42,18 +43,24 @@ for (const [set, query, , wantBook, titleRe, needleRe] of cases) {
   // a candidate that was never retrieved — the two need opposite fixes.
   const inList = rows.findIndex(r => titleRe.test(r[1] ?? ""));
   const okBk = book.includes(wantBook.replace(/_nopic.*|_all.*|_maxi.*/, ""));
-  n++; art += okArt ? 1 : 0; bk += okBk ? 1 : 0; rec += inList >= 0 ? 1 : 0;
-  // Does the article we actually fetched carry the answer? This is what the answering
-  // stage sees, and it is the only number the user experiences.
-  const body = path ? await text(book, path) : "";
-  const okAns = needleRe ? needleRe.test(body) : false;
-  ans += okAns ? 1 : 0;
-  if (!okArt) {
-    const where = inList >= 0 ? `rank ${inList + 1}` : rows.length ? "ABSENT" : "no candidates";
-    misses.push(`${set} ${query.slice(0, 42).padEnd(44)} ${where.padEnd(8)} ${okAns ? "ANSWER OK" : "no answer "} -> ${(title || "(nothing)").slice(0, 32)}`);
-  } else if (!okAns) {
-    unanswered.push(`${set} ${query.slice(0, 42).padEnd(44)} right article, needle absent`);
-  }
+  // Rank-1 is not the product's constraint: tny now sends the top 3 articles (F58), so the
+  // ceiling that matters is whether the answer is in any of them.
+  const bodies = [];
+  for (const [b, , pth] of rows.slice(0, 3)) bodies.push(pth ? await text(b, pth) : "");
+  const okAns = needleRe ? needleRe.test(bodies[0] ?? "") : false;
+  const okAns3 = needleRe ? bodies.some(x => needleRe.test(x)) : false;
+  const where = inList >= 0 ? `rank ${inList + 1}` : rows.length ? "ABSENT" : "no candidates";
+  return { set, query, okArt, okBk, okAns, okAns3, where, title, book };
+};
+
+const results = [];
+for (let i = 0; i < cases.length; i += 4) {
+  results.push(...(await Promise.all(cases.slice(i, i + 4).map(one))));
 }
-console.log(`\ncli article@1 ${art}/${n} | in shortlist ${rec}/${n} | book@1 ${bk}/${n} | ANSWER in fetched article ${ans}/${n}`);
-for (const m of misses) console.log("  MISS", m);
+const n = results.length;
+const sum = k => results.filter(r => r[k]).length;
+console.log(`\ncli article@1 ${sum("okArt")}/${n} | in shortlist ${results.filter(r => r.where.startsWith("rank") || r.okArt).length}/${n} | book@1 ${sum("okBk")}/${n}`);
+console.log(`answer present: top-1 article ${sum("okAns")}/${n} | top-3 articles ${sum("okAns3")}/${n}`);
+for (const r of results.filter(r => !r.okArt)) {
+  console.log(`  MISS ${r.set} ${r.query.slice(0, 42).padEnd(44)} ${r.where.padEnd(8)} ${r.okAns3 ? "ANSWER OK" : "no answer "} -> ${(r.title || "(nothing)").slice(0, 32)}`);
+}

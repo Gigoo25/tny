@@ -42,7 +42,13 @@ re!(LOCALISED = r"\((Magyar|Deutsch|Español|Français|Português|Italiano|Polsk
 // query: a tag index page that lists questions and answers none. Answer pages are
 // `questions/<id>/<slug>`; tag and user pages are navigation.
 re!(SE_INDEX = r"(?i)^(highest voted|newest|active|unanswered|top|recent)\b|\bquestions$");
-re!(NAV_PATH = r"questions/tagged/|/users?/|/tags?/");
+//
+// F61: those patterns MUST be anchored. Unanchored, `/tags?/` matched devdocs'
+// `engine/reference/commandline/tag/index`, so `docker tag` was classified as a navigation
+// page and dropped from every candidate list — the exact article the question asked for. In
+// a real corpus these pages only ever appear at the path root, verified against the mounted
+// Stack Exchange ZIM: `questions/tagged/bash`, never nested.
+re!(NAV_PATH = r"^questions/tagged/|^users?/|^tags?/");
 re!(QA_PATH = r"questions/[0-9]+/");
 // F49: intent is INFERRED from the query — there is no label at runtime. Measured at 12/18.
 re!(DIAGNOSE = r"(?i)\b(error|errors|fail|failed|failing|refused|denied|cannot|can't|won't|does ?n't|broken|why (is|are|does|do|did|would|am|can't)|no such|not found|timed? ?out|exit code|permission)\b");
@@ -246,6 +252,12 @@ pub fn pick_sections(html: &str, q: &str, top_n: usize, per: usize) -> Picked {
 /// F49: `lex_score` weighted every title hit +3 with no normalisation, so a 74-character
 /// Stack Exchange question title beat the Arch Wiki's "Swap" on a how-to query purely by
 /// matching more terms. That single defect cost 14 of 32 cases.
+///
+/// F59: the +3 that replaced it was still too heavy. A grid over the weights, scored offline
+/// against all 58 cases (bench/sweep.mjs), puts every one of the top 14 configurations at
+/// +2: article@1 36/58 against 32/58, and the answer reaches the top three for 47 cases
+/// against 43. The win is a plateau (title 2 x cover 3-4 x rank 4-5 all score alike), and it
+/// gains in all four fixtures, so it is not a fit to one of them.
 fn title_body_score(c: &Candidate, t: &[String]) -> f64 {
     let title = c.title.to_lowercase();
     let tw = TERM.find_iter(&title).count().max(1) as f64;
@@ -254,7 +266,7 @@ fn title_body_score(c: &Candidate, t: &[String]) -> f64 {
     let body_len = body.chars().count().min(400);
     let body = &body[..body.char_indices().nth(body_len).map_or(body.len(), |(i, _)| i)];
     let body_hits = t.iter().filter(|w| body.contains(w.as_str())).count() as f64;
-    title_hits * 3.0 / tw.sqrt() + body_hits / (t.len().max(1) as f64)
+    title_hits * 2.0 / tw.sqrt() + body_hits / (t.len().max(1) as f64)
 }
 
 /// Is the title an entity the query names? Reference questions do exactly this — "what does
@@ -308,7 +320,10 @@ pub fn rank_articles(q: &str, cands: &[Candidate]) -> Vec<Candidate> {
             let s = title_body_score(c, &t)
                 + kind_prior(intent, c.kind)
                 + title_covered(c, &t) * 3.0
-                - c.rank as f64 / 100.0;
+                // F59: Xapian's own within-book order is real evidence, and a hundredth of a
+                // point made it a tie-break nobody could win. At /5 a book's 4th hit must
+                // beat its 1st by 0.6 to overtake it — worth 4 cases on the same fixture.
+                - c.rank as f64 / 5.0;
             (s, c)
         })
         .collect();
@@ -408,6 +423,16 @@ pub fn article(kiwix: &str, book: &str, path: &str) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn nav_filter_never_eats_command_pages() {
+        // F61: `/tags?/` unanchored matched devdocs' command reference and deleted the very
+        // page the question named. Both directions must hold, on real paths from the ZIMs.
+        assert_eq!(page_kind("docker tag", "engine/reference/commandline/tag/index"), Kind::Article);
+        assert_eq!(page_kind("git tag", "git-tag/index"), Kind::Article);
+        assert_eq!(page_kind("Highest Voted 'bash' Questions", "questions/tagged/bash"), Kind::Index);
+        assert_eq!(page_kind("Swap file management", "questions/659914/swap-file-management"), Kind::Qa);
+    }
 
     #[test]
     fn prep_strips_comparison_words() {

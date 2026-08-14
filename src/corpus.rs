@@ -394,8 +394,10 @@ fn pull(dest: &Path, url: &str, want: u64) -> Result<u64, String> {
 }
 
 /// Download with `Range` resume, mirror fallback, and a byte-length check against the
-/// catalog (F21). A truncated ZIM is worse than a missing one: kiwix serves it and the
-/// answers rot.
+/// catalog (F21). A truncated ZIM is worse than a missing one: kiwix-serve refuses to mount
+/// its whole library when one file is short, so a single dead mirror took every book down
+/// (F60 — a 376 KB fragment of a 24 MB book made every query fail). Resume needs the partial
+/// bytes to survive, so they live under `.part`, which `serve_kiwix` cannot mount.
 pub fn add(zim: &Path, cache: &Path, name: &str) -> Result<PathBuf, String> {
     let entries = match cached(cache) {
         Some(e) => e,
@@ -410,29 +412,39 @@ pub fn add(zim: &Path, cache: &Path, name: &str) -> Result<PathBuf, String> {
 
     std::fs::create_dir_all(zim).map_err(|e| format!("cannot create {}: {e}", zim.display()))?;
     let dest = zim.join(format!("{}.zim", entry.stem()));
+    let part = dest.with_extension("zim.part");
     let urls = mirror_urls(&entry.href);
-    let have = std::fs::metadata(&dest).map(|m| m.len()).unwrap_or(0);
+    let disk = |p: &Path| std::fs::metadata(p).map(|m| m.len()).unwrap_or(0);
 
     // The mirrors' Content-Length is the only exact figure; the catalog's is KiB-rounded.
     let target = match remote_len(&urls) {
         Some(len) => len,
-        None if have > 0 => {
+        None if disk(&part) + disk(&dest) > 0 => {
             return Err(format!(
                 "no mirror is reachable to verify {} ({:.0} MB on disk) — re-run when one is",
                 entry.stem(),
-                have as f64 / 1e6
+                (disk(&part) + disk(&dest)) as f64 / 1e6
             ))
         }
         None => return Err(format!("no mirror is reachable for {}", entry.stem())),
     };
-    if have == target {
-        eprintln!("tny: {} already complete ({})", dest.display(), entry.size_human());
-        return Ok(dest);
+
+    // A file already under the final name is either a finished corpus or, from a tny that
+    // downloaded straight there, resumable bytes that poison the whole mount. Size decides,
+    // and a short one is moved out of the way rather than deleted: those bytes still count.
+    if disk(&dest) > 0 {
+        if disk(&dest) == target {
+            eprintln!("tny: {} already complete ({})", dest.display(), entry.size_human());
+            return Ok(dest);
+        }
+        eprintln!("tny: {} is short — resuming it as {}", dest.display(), part.display());
+        std::fs::rename(&dest, &part).map_err(|e| format!("cannot move {}: {e}", dest.display()))?;
     }
+    let have = disk(&part);
     if have > target {
         return Err(format!(
             "{} is {have} bytes but the mirror serves {target} — delete it and re-run",
-            dest.display()
+            part.display()
         ));
     }
     if have > 0 {
@@ -445,12 +457,15 @@ pub fn add(zim: &Path, cache: &Path, name: &str) -> Result<PathBuf, String> {
     // Passes, not infinite retries: a whole pass that moves zero bytes means every mirror is
     // failing, and hammering them is not a strategy.
     for pass in 0..4 {
-        let before = std::fs::metadata(&dest).map(|m| m.len()).unwrap_or(0);
+        let before = std::fs::metadata(&part).map(|m| m.len()).unwrap_or(0);
         for url in &urls {
             let host = url.split('/').nth(2).unwrap_or(url);
-            match pull(&dest, url, target) {
+            match pull(&part, url, target) {
                 Ok(n) if n >= target => {
                     eprintln!("\r     {:.0} MB from {host}", n as f64 / 1e6);
+                    // Only a complete file gets the name kiwix-serve will mount.
+                    std::fs::rename(&part, &dest)
+                        .map_err(|e| format!("cannot rename {} to {}: {e}", part.display(), dest.display()))?;
                     eprintln!("tny: {} ready", dest.display());
                     return Ok(dest);
                 }
@@ -464,7 +479,7 @@ pub fn add(zim: &Path, cache: &Path, name: &str) -> Result<PathBuf, String> {
                 }
             }
         }
-        let after = std::fs::metadata(&dest).map(|m| m.len()).unwrap_or(0);
+        let after = std::fs::metadata(&part).map(|m| m.len()).unwrap_or(0);
         if after == before {
             return Err(format!("no mirror is serving {} — last error: {last}", entry.stem()));
         }
