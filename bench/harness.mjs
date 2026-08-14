@@ -16,7 +16,12 @@ const BOOK = process.env.TNY_BOOK ?? "archlinux_en_all_maxi_2026-07";
 //   bge-small: query prefix only          nomic: search_query:/search_document:
 const QP = process.env.TNY_QP ?? "Represent this sentence for searching relevant passages: ";
 const DP = process.env.TNY_DP ?? "";
-const SYS = "Answer the question using the reference material. Be concise: at most two sentences plus the exact command if one applies.";
+// F47: the second sentence is measured, not decoration. Adding it took model-alone
+// refusal on mismatched context from 4/6 to 6/6 — the system prompt does what F27's
+// regex does — while cutting output from 31 to 29 tokens. Command-only variants
+// ("reply with that command and nothing else") *lost* a correct answer, 5/6.
+const SYS = "Answer the question using the reference material. Be concise: at most two sentences plus the exact command if one applies."
+  + " Use only facts written in the reference. Never add a flag, option, version, or path that does not appear there.";
 const NOCTX = "Answer the question. Be concise: at most two sentences plus the exact command if one applies.";
 
 // ---------------------------------------------------------------- primitives
@@ -320,22 +325,288 @@ export async function searchAll(query, want = 8) {
   const xml = await (await fetch(url)).text();
   const rows = xml.split("<item>").slice(1).map(it => {
     const link = ((it.match(/<link>([^<]*)<\/link>/) ?? [])[1] ?? "");
+    const rawSnip = ((it.match(/<description>([\s\S]*?)<\/description>/) ?? [])[1] ?? "");
+    const title = (it.match(/<title>([^<]*)<\/title>/) ?? [])[1] ?? "";
+    const path = link.replace(/^.*\/content\/[^/]+\//, "");
     return {
-      title: (it.match(/<title>([^<]*)<\/title>/) ?? [])[1] ?? "",
+      title,
       book: (link.match(/\/content\/([^/]+)/) ?? [])[1] ?? "",
-      path: link.replace(/^.*\/content\/[^/]+\//, ""),
-      snip: ((it.match(/<description>([\s\S]*?)<\/description>/) ?? [])[1] ?? "").replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim(),
+      path,
+      snip: rawSnip.replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim(),
+      // F48: kiwix bolds the terms it actually matched. That is its own match evidence, and
+      // unlike Xapian's order it is comparable across books — the only such signal the API
+      // exposes, since the search XML carries no score at all.
+      bold: [...new Set([...rawSnip.matchAll(/<b>([^<]{2,40})<\/b>/g)]
+        .map(m => m[1].toLowerCase().trim()))],
+      kind: pageKind(title, path),
     };
   });
   const seen = new Set();
   return rows.filter(c => {
     if (!c.book || LOCALISED.test(c.title)) return false;
+    if (c.kind === "index") return false;   // F48: navigation pages are never answers
     // dedupe per book: the same title in two books is two distinct answers
     const key = `${c.book}\u0000${c.title.replace(/\s*\(.*\)$/, "")}`;
     if (seen.has(key)) return false;
     seen.add(key);
     return true;
   }).slice(0, want);
+}
+
+// F48: page kind, from path structure and title shape — no model, no per-book config.
+// Mounting Stack Exchange put "Highest Voted 'pacman' Questions" at rank 1 for a how-to
+// query: a tag index page, listing questions, answering none. Q&A answer pages are
+// `questions/<id>/<slug>`; tag and user pages are navigation.
+const SE_INDEX = /^(highest voted|newest|active|unanswered|top|recent)\b|\bquestions$/i;
+export function pageKind(title, path) {
+  if (/questions\/tagged\/|\/users?\/|\/tags?\//.test(path) || SE_INDEX.test(title)) return "index";
+  if (/questions\/\d+\//.test(path)) return "qa";
+  return "article";
+}
+
+// F49: candidate GENERATION, not scoring, is the wall. Every fixture case is findable at
+// rank ≤8 by a per-book search, yet one unrouted global query fails to surface the right
+// article in its top 12 for half of them: 413k Stack Exchange pages crowd out 132-article
+// devdocs books entirely. No scorer can rank a candidate that was never retrieved.
+//
+// So: ask every book separately and merge. Each book is guaranteed representation, and the
+// cost is one request per book — measured at ~57 ms each, against a 15-22 s query.
+let MOUNTED_CACHE = null;
+export async function mountedBooks() {
+  if (MOUNTED_CACHE) return MOUNTED_CACHE;
+  const xml = await (await fetch(`${KIWIX}/catalog/v2/entries?count=-1`)).text();
+  MOUNTED_CACHE = xml.split("<entry>").slice(1).map(e => {
+    const link = (e.match(/<link[^>]*type="text\/html"[^>]*href="([^"]*)"/) ?? [])[1] ?? "";
+    return link.split("/content/")[1] ?? "";
+  }).filter(Boolean);
+  return MOUNTED_CACHE;
+}
+
+function parseItems(xml) {
+  return xml.split("<item>").slice(1).map(it => {
+    const link = ((it.match(/<link>([^<]*)<\/link>/) ?? [])[1] ?? "");
+    const rawSnip = ((it.match(/<description>([\s\S]*?)<\/description>/) ?? [])[1] ?? "");
+    const title = (it.match(/<title>([^<]*)<\/title>/) ?? [])[1] ?? "";
+    const path = link.replace(/^.*\/content\/[^/]+\//, "");
+    return {
+      title,
+      book: (link.match(/\/content\/([^/]+)/) ?? [])[1] ?? "",
+      path,
+      snip: rawSnip.replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim(),
+      bold: [...new Set([...rawSnip.matchAll(/<b>([^<]{2,40})<\/b>/g)].map(m => m[1].toLowerCase().trim()))],
+      kind: pageKind(title, path),
+    };
+  });
+}
+
+/// One book, keeping the per-book rank — Xapian's order is only meaningful within a book.
+export async function searchBook(query, book, want = 5) {
+  const url = `${KIWIX}/search?books.name=${book}&pattern=${encodeURIComponent(query)}&format=xml&pageLength=${want}`;
+  const rows = parseItems(await (await fetch(url)).text());
+  return rows.filter(c => c.book && c.kind !== "index" && !LOCALISED.test(c.title))
+    .slice(0, want).map((c, i) => ({ ...c, rank: i }));
+}
+
+/// The union of every book's best `perBook` hits.
+export async function searchUnion(query, perBook = 5, books = null) {
+  books ??= await mountedBooks();
+  const lists = await Promise.all(books.map(b => searchBook(query, b, perBook).catch(() => [])));
+  const seen = new Set();
+  return lists.flat().filter(c => {
+    const key = `${c.book}\u0000${c.title.replace(/\s*\(.*\)$/, "")}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+// F48: cross-book ranking. Xapian's search XML carries no score, so ranking across books
+// has only three comparable signals: Xapian's own order, lexical overlap, and the terms
+// kiwix bolded in the snippet. `lexScore` weights every title hit +3 with no length
+// normalisation, which is why a 74-character Stack Exchange question title beat the Arch
+// Wiki's "Swap" on a how-to query.
+const cov = (t, s) => { const l = s.toLowerCase(); return t.filter(w => l.includes(w)).length; };
+
+// Title coverage divided by sqrt(title length) — BM25's idea, minus the corpus statistics
+// kiwix will not give us.
+export function bm25t(c, t) {
+  const tw = (c.title.toLowerCase().match(/[a-z0-9-]{2,}/g) ?? []).length || 1;
+  const title = cov(t, c.title) * 3 / Math.sqrt(tw);
+  const body = cov(t, denoise(c.snip).slice(0, 400)) / Math.max(t.length, 1);
+  return title + body;
+}
+
+// kiwix's own match evidence: how many query terms it chose to bold.
+export const boldScore = (c, t) =>
+  (c.bold ?? []).filter(b => t.some(w => b.includes(w) || w.includes(b))).length;
+
+// F49: is the title an entity the query names? Every title term present in the query, for
+// titles short enough to be a name rather than a sentence.
+export function titleCovered(c, t) {
+  const tw = (c.title.toLowerCase().match(/[a-z0-9_.:-]{2,}/g) ?? []).filter(w => !/^(the|a|an|of|in|to|and|or|for)$/.test(w));
+  if (!tw.length || tw.length > 5) return 0;
+  const q = t.join(" ");
+  const covered = tw.filter(w => q.includes(w)).length;
+  return covered === tw.length ? 1 : 0;
+}
+
+// No corpus statistics are exposed, so term *shape* stands in for rarity: an identifier
+// (`--rm`, `unwrap_or_default`, `resize2fs`, `%wheel`) discriminates far more than "file".
+const rare = w => 1 + (w.length >= 8 ? 1 : 0) + (/[_.:0-9-]/.test(w) ? 1 : 0);
+export function idfScore(c, t) {
+  const title = c.title.toLowerCase();
+  const body = denoise(c.snip).slice(0, 400).toLowerCase();
+  const tw = (title.match(/[a-z0-9-]{2,}/g) ?? []).length || 1;
+  let s = 0;
+  for (const w of t) {
+    if (title.includes(w)) s += 3 * rare(w) / Math.sqrt(tw);
+    if (body.includes(w)) s += rare(w) / Math.max(t.length, 1);
+  }
+  return s;
+}
+
+// F49: two-stage retrieval. Candidate generation is solved (union recall 30/32), so the
+// remaining 13 misses have the right article in the list and rank it below something else.
+// Scoring sees only a ~200-character snippet, while the article itself costs 15-41 ms to
+// fetch — and retrieval is 2 % of a 22 s query. So fetch the top few and score real text.
+//
+// F39 tried section-evidence reranking within one book and lost (21/25 -> 16/25); this is
+// the different question of whether *full text* beats *snippet* across books.
+export async function contentScore(c, t, q) {
+    const html = await article(c.path, c.book).catch(() => "");
+    if (!html) return -1;
+    const heads = sectionsOf(html).map(s => s.head.toLowerCase()).join(" ");
+    const body = html2txt(html).toLowerCase();
+    let s = 0;
+    for (const w of t) {
+      if (c.title.toLowerCase().includes(w)) s += 3 * rare(w);
+      if (heads.includes(w)) s += 2 * rare(w);
+      // density, not raw count: a 400 KB article must not win by length
+      const hits = body.split(w).length - 1;
+      s += Math.min(hits, 8) * rare(w) * 400 / Math.max(body.length, 400) ** 0.5;
+    }
+    return s + titleCovered(c, t) * 4;
+}
+
+// The intent must be INFERRED from the query — tny has no label at runtime. Measured
+// separately below, because a prior built on a wrong intent is worse than no prior.
+const DIAGNOSE = /\b(error|errors|fail|failed|failing|refused|denied|cannot|can't|won't|does ?n't|broken|why (is|are|does|do|did|would|am|can't)|no such|not found|timed? ?out|exit code|permission)\b/i;
+export function inferIntent(q) {
+  if (DIAGNOSE.test(q)) return "diagnose";
+  if (HOWTO.test(q.trim())) return "howto";
+  return "other";
+}
+
+// A how-to question wants instructions; a Q&A page whose title is itself a question is not
+// evidence that it answers *this* one. Diagnosis is left alone — that is exactly what Q&A is
+// best at, and F42 measured 5/6 on real tool errors.
+const kindPrior = (intent, kind) =>
+  intent === "howto" && kind === "qa" ? -2 : intent === "diagnose" && kind === "qa" ? +1 : 0;
+
+export async function benchXrank() {
+  console.log("== F48 cross-book ranking: scoring a 9-book library, 413k of it Q&A ==");
+  let CASES = [];
+  for (const f of ["./fixture-instructional.mjs", "./fixture-qa.mjs"]) {
+    try { CASES = CASES.concat((await import(f)).CASES); }
+    catch { console.log(`  (${f} not present yet)`); }
+  }
+  if (!CASES.length) return console.log("  no fixture — nothing to measure");
+
+  const arms = {
+    xapian: (c, i) => -i,
+    lex: (c, _, t) => lexScore(c.title, denoise(c.snip).slice(0, 300), t),
+    bm25t: (c, _, t) => bm25t(c, t),
+    bold: (c, i, t) => boldScore(c, t) - i / 100,
+    kind: (c, _, t, intent) => bm25t(c, t) + kindPrior(intent, c.kind),
+    fused: (c, i, t, intent) => null,     // filled below: needs whole-list RRF
+    u_bm25t: null,                        // F49: per-book union candidates
+    u_kind: null,
+    u_bold: null,
+    u_title: null,
+    u_idf: null,
+    u_body: null,
+  };
+  const score = { }, book1 = { }, at3 = { }, byIntent = { };
+  for (const k of Object.keys(arms)) { score[k] = 0; book1[k] = 0; at3[k] = 0; }
+  let intentOK = 0, n = 0;
+
+  // recall ceiling: can the candidate list even contain the answer?
+  let recallGlobal = 0, recallUnion = 0, nUnion = 0;
+  for (const [q, intent, wantBook, titleRe, needleRe] of CASES) {
+    const all = await searchAll(prep(q), 12);
+    if (!all.length) { console.log(`  NO CANDIDATES ${q.slice(0, 40)}`); continue; }
+    n++;
+    const t = terms(q);
+    const guess = inferIntent(q);
+    const wantGuess = intent === "diagnose" || intent === "concept" ? "diagnose" : "howto";
+    if (guess === wantGuess || (guess === "other" && intent === "concept")) intentOK++;
+
+    // F49: the same query as a per-book union, so every book is represented
+    const union = await searchUnion(prep(q), 5);
+    const inList = list => list.some(c => titleRe.test(c.title) && c.book === wantBook);
+    if (inList(all)) recallGlobal++;
+    if (inList(union)) recallUnion++;
+    nUnion++;
+
+    const ranked = {};
+    for (const [k, f] of Object.entries(arms)) {
+      if (k === "fused" || k.startsWith("u_")) continue;
+      ranked[k] = [...all].map((c, i) => ({ c, k: f(c, i, t, guess) })).sort((a, b) => b.k - a.k).map(o => o.c);
+    }
+    // union arms: same scorers, better candidates. `rank` is the within-book Xapian order,
+    // the only place that order is meaningful.
+    ranked.u_bm25t = [...union].map(c => ({ c, k: bm25t(c, t) - c.rank / 100 })).sort((a, b) => b.k - a.k).map(o => o.c);
+    ranked.u_kind = [...union].map(c => ({ c, k: bm25t(c, t) + kindPrior(guess, c.kind) - c.rank / 100 })).sort((a, b) => b.k - a.k).map(o => o.c);
+    // F49: reference questions name their own article — "what does the --rm option do in
+    // *docker run*". A title whose every term appears in the query is an entity match, and
+    // term coverage alone cannot see it: "docker run" is 2 terms against a Stack Exchange
+    // title that matches 5 by sheer length.
+    ranked.u_title = [...union].map(c => ({ c, k: bm25t(c, t) + kindPrior(guess, c.kind) + titleCovered(c, t) * 3 - c.rank / 100 }))
+      .sort((a, b) => b.k - a.k).map(o => o.c);
+    // and a rare-term proxy: no corpus statistics are available, so shape stands in for
+    // rarity — `--rm`, `unwrap_or_default`, `resize2fs` carry more signal than "file".
+    ranked.u_idf = [...union].map(c => ({ c, k: idfScore(c, t) + kindPrior(guess, c.kind) + titleCovered(c, t) * 3 - c.rank / 100 }))
+      .sort((a, b) => b.k - a.k).map(o => o.c);
+    ranked.u_bold = [...union].map(c => ({ c, k: bm25t(c, t) + kindPrior(guess, c.kind) + boldScore(c, t) / 2 - c.rank / 100 })).sort((a, b) => b.k - a.k).map(o => o.c);
+    // F49: rescore only the shortlist the cheap stage produced — fetching all ~50 union
+    // candidates would cost a second, fetching 6 costs ~120 ms.
+    const shortlist = ranked.u_title.slice(0, 6);
+    const scored = [];
+    for (const c of shortlist) scored.push({ c, k: await contentScore(c, t, q) + kindPrior(guess, c.kind) });
+    ranked.u_body = scored.sort((a, b) => b.k - a.k).map(o => o.c).concat(ranked.u_title.slice(6));
+
+    // RRF over the three independent signals, then the intent prior as a rank nudge
+    const key = c => `${c.book}\u0000${c.title}`;
+    const lookup = Object.fromEntries(all.map(c => [key(c), c]));
+    const fusedKeys = rrf([ranked.xapian.map(key), ranked.bm25t.map(key), ranked.bold.map(key)]);
+    ranked.fused = fusedKeys.map(k => lookup[k])
+      .map((c, i) => ({ c, k: -i + kindPrior(guess, c.kind) * 2 }))
+      .sort((a, b) => b.k - a.k).map(o => o.c);
+
+    for (const [k, list] of Object.entries(ranked)) {
+      const hit = c => c && titleRe.test(c.title) && c.book === wantBook;
+      if (hit(list[0])) score[k]++;
+      if (list.slice(0, 3).some(hit)) at3[k]++;
+      if (list[0]?.book === wantBook) book1[k]++;
+      byIntent[k] ??= {};
+      byIntent[k][intent] ??= [0, 0];
+      byIntent[k][intent][1]++;
+      if (hit(list[0])) byIntent[k][intent][0]++;
+    }
+    const m = k => (titleRe.test(ranked[k][0]?.title ?? "") && ranked[k][0]?.book === wantBook ? "OK" : "x ");
+    console.log(`  xap:${m("xapian")} lex:${m("lex")} bm:${m("bm25t")} bold:${m("bold")} kind:${m("kind")} fused:${m("fused")}  [${intent}/${guess}] ${q.slice(0, 34)}`);
+  }
+  console.log(`\n  candidate recall — one global query ${recallGlobal}/${nUnion} | per-book union ${recallUnion}/${nUnion}`);
+  console.log(`  intent inferred correctly ${intentOK}/${n}`);
+  console.log("  arm      right article@1   right book@1   article@3");
+  for (const k of Object.keys(arms)) {
+    console.log(`  ${k.padEnd(8)} ${String(score[k]).padStart(9)}/${n}   ${String(book1[k]).padStart(8)}/${n}   ${String(at3[k]).padStart(6)}/${n}`);
+  }
+  console.log("\n  per intent (right article@1):");
+  for (const k of Object.keys(arms)) {
+    const parts = Object.entries(byIntent[k] ?? {}).map(([i, [a, b]]) => `${i} ${a}/${b}`);
+    console.log(`  ${k.padEnd(8)} ${parts.join(" | ")}`);
+  }
 }
 
 // F13: fuzzy title lookup for _ftindex:no books; keep only kind:"path" rows
@@ -527,9 +798,13 @@ const CROSS_CASES = [
 
 export async function benchCross() {
   console.log("== F34 cross-book retrieval: all-books vs oracle vs fused ==");
-  const sc = { oracle: 0, allRaw: 0, allRRF: 0, perFused: 0 };
-  const bk = { allRaw: 0, allRRF: 0, perFused: 0 };
-  const ms = { oracle: 0, allRaw: 0, perFused: 0 };
+  const sc = { oracle: 0, allRaw: 0, allRRF: 0, perFused: 0, allFused: 0 };
+  const bk = { allRaw: 0, allRRF: 0, perFused: 0, allFused: 0 };
+  const ms = { oracle: 0, allRaw: 0, perFused: 0, allFused: 0 };
+  // F11: kiwix's books.name is the ZIM filename stem
+  const MOUNTED = (await import("node:fs")).readdirSync("zim")
+    .filter(f => f.endsWith(".zim")).map(f => f.replace(/\.zim$/, ""));
+  console.log(`  ${MOUNTED.length} books mounted`);
   for (const [q, tag, want] of CROSS_CASES) {
     const book = CROSS_BOOKS[tag];
 
@@ -560,22 +835,35 @@ export async function benchCross() {
     const perLists = Object.entries(per).map(([b, rows]) => rows.map(r => key({ ...r, book: b })));
     const dFused = lookup[rrf(perLists)[0]];
 
+    // E: F48 — the same fusion over EVERY mounted book, not just the three the fixture
+    // knows. D wins by *excluding* the 413k-article Q&A corpus; the honest question is
+    // whether one slot per book is enough to include it without being swamped.
+    t0 = Date.now();
+    const per9 = {};
+    for (const b of MOUNTED) per9[b] = await search(prep(q), b);
+    ms.allFused += Date.now() - t0;
+    const tag9 = Object.entries(per9).flatMap(([b, rows]) => rows.map(r => ({ ...r, book: b })));
+    const look9 = Object.fromEntries(tag9.map(c => [key(c), c]));
+    const lists9 = Object.entries(per9).map(([b, rows]) => rows.map(r => key({ ...r, book: b })));
+    const eFused = look9[rrf(lists9)[0]];
+
     const hit = (c, needBook = true) => !!c && want.test(c.title) && (!needBook || c.book === book || c.book === undefined);
     const r = {
       oracle: hit(oracle[0], false),
       allRaw: hit(all[0]),
       allRRF: hit(cRRF),
       perFused: hit(dFused),
+      allFused: hit(eFused),
     };
     for (const k of Object.keys(sc)) sc[k] += r[k] ? 1 : 0;
-    for (const [k, c] of [["allRaw", all[0]], ["allRRF", cRRF], ["perFused", dFused]]) bk[k] += c?.book === book ? 1 : 0;
-    console.log(`  oracle:${r.oracle ? "OK" : "x "} all:${r.allRaw ? "OK" : "x "} all+RRF:${r.allRRF ? "OK" : "x "} perFused:${r.perFused ? "OK" : "x "} [${tag}] ${q.slice(0, 34)}`);
-    if (!r.allRRF) console.log(`      all+RRF picked [${cRRF?.book?.split("_")[0] ?? "none"}] ${cRRF?.title?.slice(0, 50) ?? "—"} (oracle: ${oracle[0]?.title?.slice(0, 40)})`);
+    for (const [k, c] of [["allRaw", all[0]], ["allRRF", cRRF], ["perFused", dFused], ["allFused", eFused]]) bk[k] += c?.book === book ? 1 : 0;
+    console.log(`  oracle:${r.oracle ? "OK" : "x "} all:${r.allRaw ? "OK" : "x "} all+RRF:${r.allRRF ? "OK" : "x "} per3:${r.perFused ? "OK" : "x "} per9:${r.allFused ? "OK" : "x "} [${tag}] ${q.slice(0, 30)}`);
+    if (!r.allFused) console.log(`      per9 picked [${eFused?.book?.split(".")[0]?.split("_")[0] ?? "none"}] ${eFused?.title?.slice(0, 50) ?? "—"}`);
   }
   const n = CROSS_CASES.length;
-  console.log(`  right article rank-1 — oracle ${sc.oracle}/${n} | all-books ${sc.allRaw}/${n} | all+RRF ${sc.allRRF}/${n} | per-book fused ${sc.perFused}/${n}`);
-  console.log(`  right BOOK rank-1  — all-books ${bk.allRaw}/${n} | all+RRF ${bk.allRRF}/${n} | per-book fused ${bk.perFused}/${n}`);
-  console.log(`  search latency per query — oracle(1 req) ${Math.round(ms.oracle / n)}ms | all-books(1 req) ${Math.round(ms.allRaw / n)}ms | per-book(3 req) ${Math.round(ms.perFused / n)}ms`);
+  console.log(`  right article rank-1 — oracle ${sc.oracle}/${n} | all-books ${sc.allRaw}/${n} | all+RRF ${sc.allRRF}/${n} | per-3 fused ${sc.perFused}/${n} | per-${MOUNTED.length} fused ${sc.allFused}/${n}`);
+  console.log(`  right BOOK rank-1  — all-books ${bk.allRaw}/${n} | all+RRF ${bk.allRRF}/${n} | per-3 fused ${bk.perFused}/${n} | per-${MOUNTED.length} fused ${bk.allFused}/${n}`);
+  console.log(`  search latency per query — oracle(1 req) ${Math.round(ms.oracle / n)}ms | all-books(1 req) ${Math.round(ms.allRaw / n)}ms | per-3(3 req) ${Math.round(ms.perFused / n)}ms | per-${MOUNTED.length}(${MOUNTED.length} req) ${Math.round(ms.allFused / n)}ms`);
 }
 
 
@@ -1116,6 +1404,74 @@ async function benchRefuse(ctx) {
   }
   console.log(`  model refused ${refused}/${n} | +F27 ${safe}/${n} | +F44 detail +F45 shape ${safeAll}/${n} | ${(t / n / 1000).toFixed(1)}s per answer`);
 }
+// F47: the answering system prompt has never been A/B tested. F15 tuned prompts, but for
+// *tool routing* — a stage the deterministic pipeline deleted. Every recorded failure is
+// plausibly a prompt problem, so this scores four things per variant on both live
+// fixtures: correctness, grounding friction (rules firing on correct answers), output
+// tokens (which *is* latency at 7.8 tok/s), and whether the model refuses unaided.
+const PROMPTS = [
+  ["current", SYS],
+  ["strict", SYS +
+    " Use only facts written in the reference. Never add a flag, option, version, or path that does not appear there."],
+  ["cmdfirst",
+    "If the reference contains a command that answers the question, reply with that command and nothing else." +
+    " Otherwise answer in at most two sentences using only the reference."],
+  ["bare", "Answer from the reference. Be brief."],
+  ["strictcmd",
+    "Answer using only the reference. If the reference contains a command that answers the question, reply with" +
+    " that command and nothing else. Never add a flag, option, version, or path that does not appear in the" +
+    " reference. Otherwise answer in at most two sentences."],
+];
+
+export async function benchPrompt(ctx) {
+  console.log("== F47 answering system prompt: 5 variants, both fixtures ==");
+  ctx ??= await buildContexts();
+  const rows = [];
+  for (const [name, sys] of PROMPTS) {
+    let ok = 0, fr = 0, tok = 0, n = 0, t = 0;
+    for (const c of ctx) {
+      n++;
+      const t0 = Date.now();
+      const { content, usage } = await ask([
+        { role: "system", content: sys },
+        { role: "user", content: `Reference:\n${c.text}\n\nQuestion: ${c.q}` },
+      ]);
+      t += Date.now() - t0;
+      tok += usage?.completion_tokens ?? 0;
+      const hit = c.needle.test(content);
+      // friction: a rule firing on a *correct* answer is a false reject, the worst outcome
+      const why = ungrounded(content, c.full ?? c.text, c.q)
+        || ungroundedDetail(content, c.full ?? c.text)
+        || ungroundedShape(content, c.text, c.q, c.vocab);
+      ok += hit ? 1 : 0;
+      fr += (hit && why) ? 1 : 0;
+      console.log(`  ${hit ? (why ? "FR " : "ok ") : "x  "} ${name.padEnd(9)} ${c.q.slice(0, 30).padEnd(30)} ${String(usage?.completion_tokens ?? 0).padStart(3)} tok${why ? `  ${why}` : ""}`);
+    }
+    // refusal arm: same mismatch construction as F26, each variant with its own suffix
+    const refuseSys = sys + " If the reference material does not contain the answer, reply exactly: not found.";
+    let refused = 0, safeAll = 0, rn = 0;
+    for (let i = 0; i < ctx.length; i++) {
+      const q = ctx[i].q, c = ctx[(i + 1) % ctx.length];
+      if (ctx[i].needle.test(c.text)) continue;
+      rn++;
+      const { content } = await ask([
+        { role: "system", content: refuseSys },
+        { role: "user", content: `Reference:\n${c.text}\n\nQuestion: ${q}` },
+      ]);
+      const no = /not found/i.test(content);
+      const caught = ungrounded(content, c.full ?? c.text, q)
+        || ungroundedDetail(content, c.full ?? c.text)
+        || ungroundedShape(content, c.text, q, c.vocab);
+      refused += no ? 1 : 0;
+      safeAll += (no || caught) ? 1 : 0;
+    }
+    rows.push({ name, ok, n, fr, tok: Math.round(tok / n), s: +(t / n / 1000).toFixed(1), refused, rn, safeAll });
+  }
+  console.log("\n  variant   | correct | false rej | tok | s/ans | refuses alone | safe");
+  for (const r of rows) {
+    console.log(`  ${r.name.padEnd(9)} | ${r.ok}/${r.n}     | ${r.fr}/${r.ok}       | ${String(r.tok).padStart(3)} | ${String(r.s).padStart(5)} | ${r.refused}/${r.rn}           | ${r.safeAll}/${r.rn}`);
+  }
+}
 
 // F28: does a follow-up turn need conversation history, or is a re-retrieved
 // reference enough? Two arms on identical contexts. The no-history arm is what a
@@ -1334,11 +1690,13 @@ if (import.meta.main) {
   else if (cmd === "file") await benchFile();
   else if (cmd === "stdin") await benchStdin();
   else if (cmd === "detail") await benchDetail();
+  else if (cmd === "prompt") await benchPrompt();
   else if (cmd === "followup") await benchFollowup();
   else if (cmd === "rewrite") await benchRewrite();
   else if (cmd === "depth") await benchDepth();
   else if (cmd === "select") await benchSelect();
   else if (cmd === "cross") await benchCross();
+  else if (cmd === "xrank") await benchXrank();
   else if (cmd === "synth") await benchSynth();
   else if (cmd === "clarify") await benchClarify();
   else if (cmd === "ground") benchGround();

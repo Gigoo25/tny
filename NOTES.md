@@ -1332,6 +1332,219 @@ requires FIDO2 hardware. F44 cannot catch either, because both flags appear in t
 article. The needle-based fixture scores these as correct, which is a further argument for
 the stricter fixture F41 demands.
 
+## F47 — the answering system prompt was never reviewed; one sentence was worth 2/6
+
+Prompts were tuned once (F15), for *tool routing* — a stage the deterministic pipeline
+deleted. The answering prompt had never been A/B tested. Five variants, both live fixtures,
+scoring correctness, grounding friction, output tokens, and unaided refusal:
+
+| variant | correct | false rej | tok | refuses alone | safe |
+|---|---|---|---|---|---|
+| current | 6/6 | 0/6 | 31 | 4/6 | 6/6 |
+| **strict** | **6/6** | **0/6** | **29** | **6/6** | 6/6 |
+| cmdfirst | 5/6 | 1/5 | 41 | 6/6 | 6/6 |
+| bare | 6/6 | 1/6 | 35 | 6/6 | 6/6 |
+| strictcmd | 5/6 | 0/5 | 29 | 6/6 | 6/6 |
+
+**Adopted `strict`** — the added sentence is *"Use only facts written in the reference.
+Never add a flag, option, version, or path that does not appear there."* It takes unaided
+refusal from **4/6 to 6/6**, doing what F27's regex does, while cutting output by 2 tokens.
+Confirmed on a second independent run: answers 6/6, **0/6 false rejects**, refuse 6/6.
+
+Two variants that *lost* an answer are as informative: both command-only phrasings
+("reply with that command and nothing else") scored 5/6, because some correct answers are
+prose. And `bare` produced a false reject, so the verbose contract earns its keep.
+
+## Speculative decoding — rejected twice, measured, not argued
+
+Pairing 0.8B as a draft model for 2B looks attractive because reranking-style workloads are
+prefill-bound, which is this CPU's fast direction (40.55 t/s prefill vs 7.82 t/s decode).
+It fails on the ratio: 0.8B decodes at 7.82 t/s against 2B's 5.08 t/s, a **1.54× draft
+advantage** where speculation wants 10×.
+
+| arm | per answer |
+|---|---|
+| 2B alone | 38.8 s |
+| 2B + 0.8B draft (`--spec-type draft-simple`, n-max 6) | **69.1 s (78 % slower)** |
+| 0.8B alone | 15.0 s |
+| 0.8B + n-gram (`--spec-type ngram-simple`) | 15.4 s (no change) |
+
+n-gram speculation was the better bet — it drafts from the prompt, costs no RAM, and our
+answers are extractive by construction — and it still bought nothing. Both rejected.
+
+## Gemma 4 E2B — rejected on arithmetic, without downloading it
+
+`google/gemma-4-E2B-it-qat-q4_0-gguf` is **3.35 GB** (E2B is *effective* 2B compute via
+per-layer embeddings; the file still carries all 4.63 B raw params). Against ~4 GB available
+on a 7.7 GB box with 2.3 GB of swap already in use, it cannot run *consistently*. And PLE
+reduces effective compute, not the dequantisation work F43 proved is this CPU's bottleneck,
+so decode ≤ 2B's 5.08 t/s → ≥39 s per answer before any paging. Not tested, and the
+decision is recorded rather than the download.
+
+## Qwen3-Reranker-0.6B — rejected: 25× the cost of the fix that already works
+
+Reranking generates exactly one token, so it is pure prefill — the objection is not "another
+model". Scoring 8 article candidates costs ~920 tokens ≈ **18 s** at ~50 t/s. F39b already
+measured the alternative: *send the top 3 articles* scored 5/6 vs 4/6 for +140 characters
+≈ 0.7 s. Section-level reranking is worse still: top-8 sections ≈ 6,400 tokens ≈ 2 minutes.
+F39 also tried four hand-built rerank formulations and **every one lost** to plain
+title+snippet (base 21/25, best variant 16/25). The one thing a cross-encoder uniquely
+offers is a *calibrated absolute score*, and both uses for that — corpus-miss detection and
+early refusal — are already solved model-free (F40 at 8/8, F27 for free after generation).
+
+## F48 — corpus growth inverted F34: one global query is swamped
+
+Mounting `unix.stackexchange.com_en_all` (413,259 articles) beside the Arch Wiki (14,497)
+broke retrieval, and the recorded decision "query all books, unrouted" (F34) went with it:
+
+| 15-case cross-book fixture | 3 books | 9 books |
+|---|---|---|
+| right **book** rank-1, one global query | 15/15 | **8/15** |
+| right **article** rank-1, one global query | 12/15 | **7/15** |
+
+Three real how-to queries through the shipped CLI all routed to Stack Exchange discussions
+instead of wiki instructions, and one produced a **factually wrong answer** — "a symmetric
+key pair" for SSH keys, from a thread about AES-256-CBC. **The grounding rules cannot catch
+this class**: the answer is faithfully grounded in the page it was given. The page is wrong.
+That makes retrieval the only unguarded stage in the pipeline.
+
+**Per-book RRF is not the fix, and knowing why matters.** RRF fuses *rankings of the same
+items*. Per-book result lists are disjoint, so every book's rank-1 ties at `1/(k+1)` and
+insertion order silently decides the winner: **3/15**, worse than doing nothing. F34's
+"per-book fused 11/15" was the same accident, disguised by a book list that happened to
+contain only relevant books.
+
+Two structural signals were being discarded, both free:
+
+* kiwix **bolds the terms it matched** in each snippet — its own match evidence, and the
+  only cross-book comparable signal in an API whose search XML carries **no score at all**.
+* the **path** identifies page kind: `questions/<id>/<slug>` is an answer page, while
+  `questions/tagged/…` and titles like "Highest Voted 'pacman' Questions" are navigation.
+  That index page was ranking #1 for a how-to query — a page that lists questions and
+  answers none. Filtering page kind is pure gain.
+
+## F49 — it was candidate *generation*, not scoring
+
+Built a fixture worth trusting first, since F41 established that 6 cases cannot rank two
+options: **32 verified cases** across four intents, each pinned to an expected book, article
+title, and a needle proven present in that article (`bench/fixture-instructional.mjs` 18,
+`bench/fixture-qa.mjs` 14). Two agents built them in parallel; 26 of 58 candidate cases were
+dropped for failing verification rather than weakening a regex.
+
+The measurement that reframed everything:
+
+| | value |
+|---|---|
+| candidate recall, one global query | **10/32** |
+| candidate recall, per-book union (5 each) | **31/32** |
+
+Every case is findable at rank ≤8 *within its book*; the global query simply never surfaces
+it. **No scorer can rank a candidate that was never retrieved** — which is why six scoring
+formulations all sat between 2/18 and 7/18. Ask each book separately and merge: 9 requests,
+~57 ms each, against a 15-22 s query.
+
+| formula (32 cases) | article@1 | book@1 | article@3 |
+|---|---|---|---|
+| `lex` — what shipped | 3/32 | 5/32 | 7/32 |
+| xapian raw | 4/32 | 7/32 | 7/32 |
+| union + bm25t | 7/32 | 8/32 | 12/32 |
+| union + kind prior | 11/32 | 12/32 | 15/32 |
+| **union + kind + title coverage** | **19/32** | **27/32** | **25/32** |
+| union + kind + rare-term weight | 18/32 | 26/32 | 24/32 |
+
+Three signals earned their place, all model-free:
+
+1. **Length-normalised title scoring.** `lexScore` weighted every title hit +3 with no
+   normalisation, so a 74-character Stack Exchange question title beat the Arch Wiki's
+   "Swap" on a how-to query by matching more terms through sheer length.
+2. **Title coverage as an entity match.** Reference questions name their own article — "what
+   does the `--rm` option do in *docker run*". Term coverage cannot see that; "every term of
+   a short title appears in the query" can, and it took `reference` from 3/6 to 4/6.
+3. **Intent × page-kind prior.** A how-to question wants instructions, and a Q&A title that
+   is itself a question is not evidence that it answers *this* one. Intent is inferred from
+   the query by regex (12/18 correct), never labelled.
+
+**Where it is still weak, honestly:** `diagnose` sits at 4-5/10 and no formulation improved
+it. The QA fixture's own construction explains why — 6 of its 15 dropped cases were dropped
+because *the wiki answered them better* (sudo password timeout, `.bashrc` vs
+`.bash_profile`, `sh` vs `bash`, permission denied on an owned directory). So "diagnosis
+prefers Q&A" is not true as a prior, and the remaining 13/32 rank-1 misses are unfixed.
+
+## F50 — the Rust CLI exists and answers end-to-end
+
+`src/main.rs`, `src/retrieve.rs`, `src/ground.rs`, `src/corpus.rs` — three deps (`ureq`,
+`serde_json`, `regex`), no async runtime, no clap, no HTML parser. 13 unit tests carry the
+31-case grounding self-test, and they are pure: no servers, no network.
+
+First full-query measurement, the number PLAN.md had never had:
+
+| stage | time |
+|---|---|
+| search | 467 ms |
+| fetch article | 15 ms |
+| generate | 21,226 ms |
+| **total** | **22.6 s** |
+
+Retrieval is **2 %** of a query. That kills any objection to spending more requests on
+better candidates (F49), and it means every latency lever is prefill: at ~40 t/s, the
+top-5×600-char lexical context costs ~18 s of the 22.6 s. The embedding selector's 39 %
+smaller prompt (F31) is therefore worth ~8 s per query — now measured end-to-end rather
+than derived, and worth revisiting.
+
+Deliberately not built: `--online` fallback, tool calling (F6, unused by a deterministic
+pipeline), local file reading (F41, cut for lack of a trustworthy fixture), and an embedder
+(one fewer supervised process; `pickSectionsLex` is 14/14 at top-5).
+
+## F51 — the catalog's own length is wrong, and my check trusted it
+
+`tny --corpus add wikipedia_en_top_nopic` refused a *complete* 2.2 GB download and retried
+forever. The catalog advertises `length="2239865856"`; the file is really **2,239,864,871**
+bytes. 2239865856 / 1024 = 2187369 exactly — the catalog rounds every size **up to a KiB
+boundary**. The byte-verification from F21 compared against that figure, so any download
+whose true size is not KiB-aligned could never be declared complete.
+
+Fix, and the general rule: **the transferring party is the authority on the transfer.** A
+`HEAD` against the mirrors gives the exact `Content-Length`; the catalog figure is now used
+only for display and as a fallback. A `416 Range Not Satisfiable` reply carries
+`Content-Range: bytes */<total>`, which is the server stating the size outright — treated as
+proof of completion when local bytes match, not as an error.
+
+## F52 — one hard-coded host is a design flaw; measured, not theorised
+
+Mid-session **every `kiwix.org` host went down** — `library.kiwix.org` (the catalog),
+`download.kiwix.org`, and `mirror.download.kiwix.org` all timed out. Three independent
+mirrors stayed up and all reported the identical length:
+
+| host | status | length |
+|------|--------|--------|
+| library.kiwix.org | timeout | — |
+| lb.download.kiwix.org | timeout | — |
+| mirrors.dotsrc.org | 200 | 2,239,864,871 |
+| ftp.fau.de | 200 | 2,239,864,871 |
+| saimei.ftp.acc.umu.se | 200 | 2,239,864,871 |
+
+`corpus::add` now tries the catalog URL then those mirrors in order, per pass, and a pass
+that advances zero bytes aborts instead of hammering. Proven live: the second corpus failed
+over from the dead `download.kiwix.org` to `mirrors.dotsrc.org` and completed. The cached
+catalog (1.5 MB) meant the library outage could not block downloads at all.
+
+## F53 — full article text loses to kiwix's snippet, twice measured
+
+Union recall reached 30/32 while the best scorer got 17/32 right at rank 1, so 13 cases had
+the right article in the list and ranked it below something else. The obvious next lever:
+stop scoring a ~200-character snippet and score the article. Fetches cost 15–41 ms and
+retrieval is 2 % of a query, so 6 fetches per query is affordable.
+
+**Result: 5/32 — a third of the snippet scorer.** Every intent got worse (howto 7→2,
+reference 3→0, diagnose 4→1). Same direction as F39's section-evidence rerank (21/25 →
+16/25), and now the reason is clear: **kiwix's snippet is the query-matched passage**.
+Xapian has already localised the evidence. Full text replaces a focused signal with a
+diluted one, and no length normalisation recovers it — the information was in *which*
+passage matched, which the body no longer tells you.
+
+Closed: content-based reranking. The remaining ranking headroom is in title/entity signals
+and page kind, not in reading more text.
+
 ## Exploration backlog — speed
 
 The cost model, measured (0.8B Q8_0, 4 threads, this CPU):
