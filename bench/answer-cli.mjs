@@ -48,24 +48,40 @@ function factOf(needleRe) {
 // The number must stand alone: "195" inside "42.195" is not a match for 195, but "42.195" is.
 const hasNum = (ans, n) => new RegExp(String.raw`(?<![\d.,])${n.replace(".", "\\.")}(?![\d])`).test(ans.replace(/,/g, ""));
 const hasWord = (ans, words) => words.some(w => new RegExp(String.raw`\b${w}`, "i").test(ans));
-
-const only = process.argv[2];
+const only = process.argv.slice(2).find(a => !a.startsWith("-"));
+// Generation costs ~20 s per case, so a grader change must never re-pay it: answers are cached
+// verbatim and `--regrade` scores the cache offline, the same split that made the retrieval
+// sweep usable (F56).
+const CACHE = "bench/.answers.json";
+const regrade = process.argv.includes("--regrade");
+const cache = await Bun.file(CACHE).exists() ? JSON.parse(await Bun.file(CACHE).text()) : {};
 const tally = {};
 const t0 = Date.now();
 
-for (const [set, query, , , , needleRe] of CASES) {
-  if (only && set !== only) continue;
-  const t = Date.now();
+async function answerOf(query) {
+  if (regrade) return cache[query] ?? { ans: "", err: "" };
   const p = Bun.spawn(["./target/release/tny", query], { stdout: "pipe", stderr: "pipe" });
-  const out = await new Response(p.stdout).text();
+  const ans = (await new Response(p.stdout).text()).trim();
   const err = await new Response(p.stderr).text();
   await p.exited;
-  const ans = out.trim();
+  cache[query] = { ans, err };
+  return cache[query];
+}
+
+// [set, query, intent, book, titleRe, needleRe, expectRe] — `set` is prepended above, so the
+// answer-grading regexes are at 5 and 6, not 4 and 5.
+for (const [set, query, , , , needleRe, expectRe] of CASES) {
+  if (only && set !== only) continue;
+  const t = Date.now();
+  const { ans, err } = await answerOf(query);
   // tny prints the answer on stdout and its diagnostics on stderr; a refusal is either the
   // "not found" sentinel or an empty answer with a rejection note.
   const refused = /^not found$/im.test(ans) || ans === "" || /rejected/.test(err);
+  // An authored `expectRe` grades the answer directly: it was written against the source
+  // article to accept any paraphrase of the fact and reject the plausible wrong answer, which
+  // the needle-derived rule cannot do. Cases without one fall back to that rule.
   const { num, words } = factOf(needleRe);
-  const correct = !refused && (num === null ? hasWord(ans, words) : hasNum(ans, num));
+  const correct = !refused && (expectRe ? expectRe.test(ans) : num === null ? hasWord(ans, words) : hasNum(ans, num));
   const verdict = refused ? "REFUSED" : correct ? "ok" : "WRONG";
   tally[set] ??= { correct: 0, refused: 0, wrong: 0, n: 0, ms: 0 };
   tally[set].n++;
@@ -73,6 +89,8 @@ for (const [set, query, , , , needleRe] of CASES) {
   tally[set][refused ? "refused" : correct ? "correct" : "wrong"]++;
   console.log(`${verdict.padEnd(8)} ${((Date.now() - t) / 1000).toFixed(0).padStart(3)}s ${set} ${query.slice(0, 46).padEnd(48)} ${ans.replace(/\s+/g, " ").slice(0, 70)}`);
 }
+
+if (!regrade) await Bun.write(CACHE, JSON.stringify(cache, null, 1));
 
 console.log("");
 let C = 0, R = 0, W = 0, N = 0;

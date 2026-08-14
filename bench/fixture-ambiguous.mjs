@@ -4,7 +4,11 @@
 // five ambiguous terms asked twice, once in the everyday sense and once in the computing
 // sense, so the two directions can be compared on the same term.
 //
-// Format, identical to the sibling fixtures: [query, intent, bookStem, titleRe, needleRe].
+// Format: [query, intent, bookStem, titleRe, needleRe, expectRe]. The sixth element grades a
+// free-text ANSWER: it accepts the wanted sense and rejects the sibling sense. Each was tested
+// three ways — it matches the tag-stripped source article, it matches paraphrase exemplars, and
+// it matches nothing in the *whole sibling article* of the pair (e.g. the corn-kernel regex
+// finds no match anywhere in Kernel (operating system)). See the trailing // grades: notes.
 // Every case verified live: searchBook(prep(query), bookStem, 8) returned the article,
 // article() + html2txt() contained the needle, and the surrounding paragraph was read to
 // confirm it answers the question. titleRe matches exactly one of the 8 hits.
@@ -48,21 +52,32 @@ const COMP = "wikipedia_en_computer_nopic_2026-06"; // 244,179 articles
 export const CASES = [
   // ---- everyday sense wanted, computing sense must lose ----------------------------
   ["what is a kernel in corn", "concept", TOP,
-    /^Maize$/i, /known as kernels or seeds/i],
+    /^Maize$/i, /known as kernels or seeds/i,
+    /^(?![\s\S]*\b(operating system|linux|kernel space|userspace|user space|cpu|device driver|software)\b)[\s\S]*\b(seeds?|grains?|caryopsis|fruit|corncob|cob|ear of (?:corn|maize)|kernels? of (?:the )?(?:corn|maize))\b/i],
+    // grades: accepts "a small one-seeded dry indehiscent fruit" (the caryopsis sense, via
+    // "fruit"); rejects "the computer program at the core of an operating system".
   // prep: "kernel corn". TOP r=2 (Sweet corn, Grits, Maize); union idx 12 of 15.
   // COMP for the same query: Asus ZenFone, Google Pixel, GNU/Linux naming controversy —
   // no kernel-as-software article competes. Maize: "The ears yield grain, known as kernels
   // or seeds", and later the caryopsis definition.
 
   ["what is a shell in biology", "concept", TOP,
-    /^Mollusca$/i, /chitin reinforced with calcium carbonate/i],
+    /^Mollusca$/i, /chitin reinforced with calcium carbonate/i,
+    /^(?![\s\S]*\b(command[- ]?line|shell script|bash|terminal|operating system|user interface|interpreter)\b)[\s\S]*(calcium carbonate|chitin|mantle|exoskeleton|(?:hard|rigid|protective|outer|external)[\s\S]{0,30}(?:covering|casing|shell|skeleton|armou?r)|protects?[\s\S]{0,30}(?:soft|body|animal))/i],
+    // grades: accepts "the hard outer covering of an animal's body" and the material answer
+    // (calcium carbonate / chitin / secreted by the mantle); rejects "a command-line
+    // interpreter such as bash" and "a thin layer around the operating system".
   // prep: "shell biology". TOP r=4 (Bivalvia, Turtle shell, Scallop, Cephalopod, Mollusca);
   // union idx 1 of 21. COMP: Galaxy (computational biology), BioRuby, NetworkX — "biology"
   // pulls bioinformatics tools, not shells. Mollusca: the shell "is made of proteins and
   // chitin reinforced with calcium carbonate, and is secreted by a mantle".
 
   ["what is a cookie made of", "concept", TOP,
-    /^Biscuit$/i, /flour-based baked food/i],
+    /^Biscuit$/i, /flour-based baked food/i,
+    /^(?![\s\S]*\b(web server|web browser|website|stateful|session id|HTTP (?:cookie|request|header|response))\b)[\s\S]*\b(flour|dough|sugar|butter|shortening|batter|eggs?|baked|baking|bake)\b/i],
+    // grades: accepts any ingredient answer (flour/fat/sugar/dough/eggs, baked); rejects "a
+    // small block of data created by a web server". Bare "http" is NOT a ban term — the
+    // Biscuit article carries a http:// citation URL, so the ban is on "HTTP cookie/request".
   // prep: "cookie made". TOP r=2 (Oreo, Girl Scout Cookies, Biscuit) with HTTP cookie at
   // r=3 and Cross-site request forgery at r=4 — the only case where the computing sense
   // genuinely intrudes inside the winning book. Union idx 23 of 29, behind three wget/curl
@@ -70,7 +85,11 @@ export const CASES = [
   // item", and it records that US English calls the sweet ones cookies.
 
   ["how do python snakes kill their prey", "concept", TOP,
-    /^Reticulated python$/i, /killing by constriction/i],
+    /^Reticulated python$/i, /killing by constriction/i,
+    /^(?![\s\S]*\b(programming language|guido|interpreter|source code|python 3)\b)[\s\S]*(constrict\w*|coil\w*|squeez\w*|suffocat\w*|asphyxiat\w*|crush\w*|cut(?:s|ting)? off[\s\S]{0,30}(?:blood|circulation|air|breathing))/i],
+    // grades: requires the mechanism — constriction/coils/squeezing/suffocation; rejects a
+    // diet-only answer ("mammals and occasionally birds, rats, civets, wild boar"), a
+    // habitat-only answer, and the false "they are venomous and inject venom".
   // prep: "python snakes kill their prey". TOP r=0 (then Burmese python, Central African
   // rock python); COMP returns ZERO hits — "prey"/"kill" AND-out every computing page.
   // Union idx 1 of only 6, behind archlinux/List of games. Reticulated python: "an ambush
@@ -78,7 +97,12 @@ export const CASES = [
   // its coils and killing by constriction".
 
   ["how does the brain consolidate long term memory", "concept", TOP,
-    /^Hippocampus$/i, /consolidation of information from short-term memory to long-term memory/i],
+    /^Hippocampus$/i, /consolidation of information from short-term memory to long-term memory/i,
+    /^(?![\s\S]*\b(disk|swap\w*|paging|page file|physical memory|MMU|virtual address|operating system)\b)[\s\S]*(hippocamp\w*|medial temporal lobe|long-term potentiation|synap\w*|neocortex|during sleep|replay\w*)/i],
+    // grades: requires a neural locus or mechanism (hippocampus, neocortical transfer, LTP,
+    // synapses, sleep replay), so bare "consolidation" is not enough; rejects "the OS swaps
+    // pages between RAM and disk". "RAM" is NOT a ban term — /i makes it hit "Ram's horn",
+    // which the Hippocampus article uses for the structure's etymology.
   // prep: "brain consolidate long term memory". TOP r=6 (Memory, Anterograde amnesia,
   // Spatial memory, Emotion and memory, Flashback, Amygdala, Hippocampus) — inside want=8,
   // outside a top-5 union, so union idx = -1 of 13. COMP: The Magical Number Seven,
@@ -87,34 +111,57 @@ export const CASES = [
 
   // ---- computing sense wanted, everyday sense must lose ----------------------------
   ["what is a kernel in an operating system", "concept", COMP,
-    /^Kernel \(operating system\)$/i, /computer program at the core of a computer/i],
+    /^Kernel \(operating system\)$/i, /computer program at the core of a computer/i,
+    /^(?![\s\S]*\b(maize|corn|popcorn|seeds?|caryopsis|cob)\b)[\s\S]*(core of (?:a|the|an)?[\s\S]{0,30}(?:computer|operating system|os)|central (?:part|component|core)|complete control|(?:controls?|manages?|mediat\w*|arbitrat\w*|interfaces?|bridges?)[\s\S]{0,60}(?:hardware|resources|processes|memory|software))/i],
+    // grades: accepts core-of-the-OS, complete control, or mediating hardware/processes;
+    // rejects "the edible seed or grain of maize, found on the cob".
   // prep: "kernel operating system". COMP r=0; union idx 7 of 48. TOP holds the same page
   // at r=0 too (duplicate, not a rival sense); no corn/maize article appears anywhere.
   // Needle: "A kernel is a computer program at the core of a computer's operating system
   // that always has complete control over everything in the system."
 
   ["what is a shell in computing", "concept", COMP,
-    /^Shell \(computing\)$/i, /relatively thin layer around an operating system/i],
+    /^Shell \(computing\)$/i, /relatively thin layer around an operating system/i,
+    // `instruction`/`keyboard`/`alphanumeric` are computing-only vocabulary, absent from any
+    // mollusc prose, so they widen coverage without weakening sense discrimination: the
+    // article's own lead defines a shell as taking "alphanumeric characters typed on a
+    // keyboard" to "provide instructions and data", and an answer that says exactly that was
+    // being marked wrong.
+    /^(?![\s\S]*\b(mollusc\w*|snail|calcium carbonate|chitin|turtle|clam|egg ?shell)\b)[\s\S]*(commands?|CLI|command[- ]?line|shell script|interpret\w*|user interface|prompt|terminal|instruction\w*|keyboard|alphanumeric|(?:layer|wrapper|interface) around[\s\S]{0,30}(?:operating system|kernel|os))/i],
+    // grades: accepts the thin-layer definition and any command/CLI/interpreter/prompt
+    // phrasing; rejects "the hard protective outer covering of an animal such as a mollusc".
   // prep: "shell computing". COMP r=0 (Web shell, Remote Shell, Shell account follow);
   // union idx 10 of 48. TOP: same page at r=0; zero mollusc hits. Needle: "The term shell
   // refers to how it is a relatively thin layer around an operating system."
 
   ["what is an http cookie used for", "reference", COMP,
-    /^HTTP cookie$/i, /small block of data created by a web server/i],
+    /^HTTP cookie$/i, /small block of data created by a web server/i,
+    /^(?![\s\S]*\b(flour|dough|sugar|butter|baked|baking)\b)[\s\S]*(stateful|session|log(?:ged|ging)?[- ]?in|sign(?:ed|ing)?[- ]?in|authenticat\w*|track\w*|remember\w*|preferences?|shopping cart|personalis\w*|personaliz\w*|browsing (?:history|activity))/i],
+    // grades: the question is "used for", so it requires a purpose — state/session, login,
+    // remembering preferences, the shopping cart, tracking; rejects "a sweet flour-based
+    // baked food made from dough".
   // prep: "http cookie used". COMP r=0; union idx 5 of 30, behind four curl/wget cookie
   // threads. TOP: same page at r=0; no Biscuit/Oreo. Needle: "An HTTP cookie ... is a small
   // block of data created by a web server while a user is browsing a website", used to
   // store stateful information on the device.
 
   ["what is python the programming language", "concept", COMP,
-    /^Python \(programming language\)$/i, /significant indentation/i],
+    /^Python \(programming language\)$/i, /significant indentation/i,
+    /^(?![\s\S]*\b(reptile|serpent|constrict\w*|non-?venomous|ambush predator)\b)[\s\S]*(programming language|high[- ]level|significant (?:indentation|whitespace)|interpreted|dynamic(?:ally)? typ\w*|readability|garbage[- ]collect\w*|Guido van Rossum|scripting|general[- ]purpose)/i],
+    // grades: accepts any language-property answer (high-level, general-purpose, readability,
+    // significant indentation, dynamic typing, Guido); rejects "a large non-venomous snake
+    // that kills its prey by constriction". Bare "snake" is not a ban term (it is unneeded —
+    // no animal-sense answer carries a positive term); the banned words are the animal ones.
   // prep: "python programming language". COMP r=0; union idx 8 of 35. The one case with a
   // live cross-book rival: archlinux/Python also lands in the union. TOP: same page at r=0,
   // no snake articles. Needle: Python "emphasizes code readability, simplicity, and
   // ease-of-writing with the use of significant indentation".
 
   ["what is virtual memory in a computer", "concept", COMP,
-    /^Virtual memory$/i, /maps memory addresses used by a program, called virtual addresses/i],
+    /^Virtual memory$/i, /maps memory addresses used by a program, called virtual addresses/i,
+    /^(?![\s\S]*\b(hippocamp\w*|brain|neuro\w*|synap\w*|amnesia)\b)[\s\S]*(virtual address|address (?:space|translation)|physical (?:address|memory)|pagin\w*|page (?:file|table)|swap\w*|MMU|memory management unit|secondary storage|illusion[\s\S]{0,40}memory|maps? memory)/i],
+    // grades: accepts the address-mapping answer and the paging/swap/MMU mechanism; rejects
+    // "the hippocampus consolidates short-term memory into long-term memory".
   // prep: "virtual memory computer". COMP r=0; union idx 6 of 35. TOP: same page at r=0;
   // no Hippocampus/amnesia. Needle: the OS "maps memory addresses used by a program, called
   // virtual addresses, into physical addresses in computer memory".

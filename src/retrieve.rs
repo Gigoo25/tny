@@ -55,6 +55,9 @@ re!(DIAGNOSE = r"(?i)\b(error|errors|fail|failed|failing|refused|denied|cannot|c
 re!(HOWTO_Q = r"(?i)^(how (do|can|would) i|how to|what command)\b|^(create|set|mount|encrypt|generate|check|list|install|enable|configure|disable|remove|start|stop|make)\b");
 re!(TITLE_TERM = r"[a-z0-9_.:-]{2,}");
 re!(TITLE_STOP = r"^(the|a|an|of|in|to|and|or|for)$");
+// F64: apparatus, not content — citation and navigation sections that answer nothing but match
+// query terms densely because they are lists of titles.
+re!(APPARATUS = r"(?i)^\s*(references?|external links?|see also|further reading|bibliography|notes?|citations?|sources?|footnotes?|related pages?|external resources?)\s*$");
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Kind {
@@ -232,10 +235,30 @@ pub fn pick_sections(html: &str, q: &str, top_n: usize, per: usize) -> Picked {
     let mut scored: Vec<(usize, usize)> = secs
         .iter()
         .enumerate()
+        // F64: an apparatus section is never an answer. `References` is a wall of article
+        // titles, so it matches query terms by sheer density and outscored the prose: asked
+        // "when did the berlin wall fall", tny picked §References twice plus §20th anniversary
+        // celebrations — an event held in **2009** — and the model dutifully answered "November
+        // 9, 2009" from the section it was shown, with the right article on screen. A wrong
+        // section is indistinguishable from a hallucination in the output.
+        .filter(|(_, s)| !APPARATUS.is_match(&s.head))
         .map(|(i, s)| (i, lex_score(&s.head, &s.text, &t)))
         .collect();
     scored.sort_by(|a, b| b.1.cmp(&a.1));
-    let top = &scored[..top_n.min(scored.len())];
+    // Wikipedia repeats `References` under several parents, so the same head can win more than
+    // one slot and spend the budget twice on identical junk.
+    let mut heads_seen: Vec<&str> = Vec::new();
+    let top: Vec<(usize, usize)> = scored
+        .into_iter()
+        .filter(|(i, _)| {
+            let h = secs[*i].head.as_str();
+            !heads_seen.contains(&h) && {
+                heads_seen.push(h);
+                true
+            }
+        })
+        .take(top_n)
+        .collect();
     Picked {
         heads: top.iter().map(|(i, _)| secs[*i].head.clone()).collect(),
         text: top

@@ -78,6 +78,7 @@ fn main() {
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
         match a.as_str() {
+            "-v" | "--verbose" => verbose = true,
             "--rank" => rank_only = true,
             "--dump" => dump = true,
             "-f" | "--follow" => follow = true,

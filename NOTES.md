@@ -1713,6 +1713,58 @@ term. Answering from `pg_combinebackup` would be a confident wrong answer; askin
 the user means is safe. **The clarify prompt is correct behaviour and stays**, and these two
 cases are scored as refusals rather than errors.
 
+## F63 — a wrong section is indistinguishable from a hallucination
+
+"when did the berlin wall fall" answered **"November 9, 2009"**. The obvious reading is
+fabrication, and it was not. `tny -v` shows the retrieval was *correct* — the right article,
+`Fall of the Berlin Wall` — and names the sections it sent:
+
+```
+§References, §20th anniversary celebrations, §References, §Fall, §1 Answers 1
+```
+
+`§20th anniversary celebrations` describes an event **held in 2009**. The model answered
+faithfully from the section it was shown. Two model-free defects produced it:
+
+1. **Apparatus sections were eligible.** `References` is a wall of article titles, so it
+   matches query terms by sheer density and outscored the prose. It won two of five slots.
+2. **No dedupe by head.** Wikipedia repeats `References` under several parents, so one head
+   can take several slots and spend the budget twice on identical junk.
+
+Filtering apparatus heads (`references`, `see also`, `external links`, `bibliography`, …) and
+deduping by head gives `§20th anniversary celebrations, §Official demolition, §Fall, §Start of
+the construction (1961)` and the answer **"November 9, 1989"**.
+
+The lesson generalises past this bug: **no retrieval metric can see this failure.** article@1
+was correct, answer@3 was correct, the answer was wrong. Generation got slower (9.8 s → 28.8 s)
+precisely because the sections now hold prose instead of citation lists — the speed was a
+symptom of sending junk.
+
+## F64 — the grader had to be measured too, and it was broken
+
+Two bugs in `bench/answer-cli.mjs`, both of which produced *plausible* numbers:
+
+- **Tuple misalignment.** `bench/answer-cli.mjs` prepends the fixture name, making each case 7
+  long, but the loop destructured 6. So `expectRe` silently received `needleRe` and every score
+  was computed by the article-prose regex the fact grader was written to replace. The reported
+  32/58 measured nothing that was intended.
+- **`only` matched `argv[0]`**, filtering every case out, and reported `0/0` rather than failing.
+
+With both fixed, the ambiguous fixture — the hardest one, ten word-sense pairs — scores **10/10**
+where the broken grader claimed 5/10. Answers that were always correct were being counted wrong:
+
+```
+"A corn kernel is a small one-seeded dry indehiscent fruit"        graded WRONG, is right
+"A kernel is the core component of an operating system"            graded WRONG, is right
+"a shell ... uses alphanumeric characters typed on a keyboard"     graded WRONG, is right
+```
+
+Generation is also now cached (`bench/.answers.json`, `--regrade`), so a grader change costs
+**0.3 s instead of 14 minutes** — the same split that made the retrieval sweep usable in F56.
+A benchmark is code, and an unmeasured benchmark is worth as little as unmeasured code:
+every number in this session's earlier answer runs was wrong for a reason that had nothing to
+do with the system under test.
+
 ## Exploration backlog — speed
 
 The cost model, measured (0.8B Q8_0, 4 threads, this CPU):

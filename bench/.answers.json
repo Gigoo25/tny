@@ -1,0 +1,42 @@
+{
+ "what is a kernel in corn": {
+  "ans": "A corn kernel is a small one-seeded dry indehiscent fruit (as of corn or wheat) in which the fruit and seed fuse in a single grain.",
+  "err": "biology.stackexchange.com_en_all_2026-02 · Are corn kernels considered a grain · §1 Answers 1, §Boil the corn, §Fry the corn on a lower temperature, §4 Answers 4 (16.5s)\n"
+ },
+ "what is a shell in biology": {
+  "ans": "In biology, a shell refers to the hard outer covering of an animal's body, typically made of keratinous plates or bony structures (like a turtle shell) or exoskeletons found in arthropods and mollusks.",
+  "err": "wikipedia_en_top_nopic_2026-06 · Turtle shell · §Shell nomenclature, §Triassic: evolution of complete shell, §Accessibility, §Tools, §Synthesis, §Biomedical applications (15.6s)\n"
+ },
+ "what is a cookie made of": {
+  "ans": "Based on the reference material, a cookie can be made of butter, sugar, and flour, with the dough likely containing self-caramelized sugar similar to caramel sauce or milk caramels.",
+  "err": "wikipedia_en_computer_nopic_2026-06 · Zombie cookie · §Controversies, §Purpose, §3 Answers 3, §1 Answers 1 (12.7s)\n"
+ },
+ "how do python snakes kill their prey": {
+  "ans": "The reticulated python is an ambush predator that waits until prey enters its strike range before seizing it in its coils and killing by constriction. The Burmese python is a sit-and-wait predator that grabs prey with sharp teeth and wraps its body around the animal to kill it through constriction, swallowing the prey whole.",
+  "err": "wikipedia_en_top_nopic_2026-06 · Reticulated python · §Danger to humans, §Diet, §As an invasive species, §Diet, §1 Answers 1 (13.7s)\n"
+ },
+ "how does the brain consolidate long term memory": {
+  "ans": "Long-term memory consolidation involves stable and permanent changes in neural connections that occur throughout the brain, primarily mediated by long-term potentiation (LTP) and long-term depression (LTD), which are thought to be mediated by specific brain regions.",
+  "err": "wikipedia_en_top_nopic_2026-06 · Memory · §Long-term memory, §Physiology, §3 Answers 3, §Long-term spatial memory, §Short-term spatial memory (24.2s)\n"
+ },
+ "what is a kernel in an operating system": {
+  "ans": "A kernel is the core component of an operating system that manages hardware resources and provides services to applications, allowing them to interact with the computer's hardware without direct user-level permission.",
+  "err": "wikipedia_en_computer_nopic_2026-06 · Kernel (operating system) · §Early operating system kernels, §System calls, §Early operating system kernels, §System calls, §Comparison criteria, §Supported kernel execution environment (13.0s)\n"
+ },
+ "what is a shell in computing": {
+  "ans": "A shell in computing is an operating system shell that uses alphanumeric characters typed on a keyboard to provide instructions and data to the operating system, interactively.",
+  "err": "wikipedia_en_computer_nopic_2026-06 · Shell (computing) · §Command-line shells, §Overview, §Command-line shells, §Overview, §Definition, §Example (12.8s)\n"
+ },
+ "what is an http cookie used for": {
+  "ans": "An HTTP cookie is a text file stored in the browser's memory that allows the user to access data on their behalf, such as remembering a password or session ID.",
+  "err": "wikipedia_en_computer_nopic_2026-06 · HTTP cookie · §Setting a cookie, §Http-only cookie, §Setting a cookie, §Http-only cookie, §CookieJar and FileCookieJar Objects, §FileCookieJar subclasses and co-operation with web browsers (10.5s)\n"
+ },
+ "what is python the programming language": {
+  "ans": "Python is a multi-paradigm programming language supported by extensions like design by contract and logic programming.",
+  "err": "wikipedia_en_computer_nopic_2026-06 · Python (programming language) · §Design philosophy and features, §Languages influenced by Python, §Design philosophy and features, §Languages influenced by Python, §Alternative implementations, §List packages built for a specific Python version (10.3s)\n"
+ },
+ "what is virtual memory in a computer": {
+  "ans": "Virtual memory allows a computer to extend its physical memory beyond the available RAM by using a system that divides memory into segments and pages, enabling programs to access data from secondary storage like hard drives.",
+  "err": "wikipedia_en_computer_nopic_2026-06 · Virtual memory · §Segmented virtual memory, §History, §Segmented virtual memory, §History, §Origins, §Benefits (14.5s)\n"
+ }
+}
