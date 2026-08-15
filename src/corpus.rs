@@ -490,3 +490,126 @@ pub fn add(zim: &Path, cache: &Path, name: &str) -> Result<PathBuf, String> {
         dest.display()
     ))
 }
+
+// ------------------------------------------------------------------ packs
+
+/// F87: `--corpus search` then `--corpus add` one book at a time is how the library got built
+/// here, and it is a bad first five minutes: the user has to know that `devdocs_en_bash`
+/// exists before they can want it. A pack is one command for a whole shelf, and the tiers are
+/// cumulative so "the next size up" is a meaningful thing to ask for.
+///
+/// Sizes are read from the catalog at run time, never hardcoded — the numbers below are only
+/// what the tiers came to when they were chosen (2026-08), and every one is a real entry
+/// verified against the local catalog.
+pub const PACK_NAMES: &[&str] = &["mini", "small", "medium", "large", "huge"];
+
+pub fn pack(name: &str) -> Option<(Vec<&'static str>, &'static str)> {
+    // Under 100 MB in total, and it answers the question a terminal tool is asked most:
+    // "what are the flags for X". 12,626 man pages cost 28 MB — the best value in the whole
+    // catalogue for this program, and the library here went nine sessions without them.
+    let mini: Vec<&'static str> = vec![
+        "devdocs_en_man",
+        "devdocs_en_bash",
+        "devdocs_en_git",
+        "devdocs_en_python",
+        "devdocs_en_docker",
+        "devdocs_en_postgresql",
+        "devdocs_en_rust",
+        "devhints.io_en_all",
+        "archlinux_en_all_maxi",
+    ];
+    // The fuller man page set (73k pages), the distro wikis that answer the rest of the
+    // "how do I" questions, and a general-knowledge floor.
+    let small = [
+        mini.clone(),
+        vec![
+            "www.mankier.com_en_all",
+            "gentoo_en_all_maxi",
+            "alpinelinux_en_all_maxi",
+            "peps.python_en_all",
+            "wikipedia_en_100",
+            "unix.stackexchange.com_en_all",
+        ],
+    ]
+    .concat();
+    // Encyclopedia coverage — this is the shelf every number in NOTES.md was measured on —
+    // plus the two reference works that answer questions Wikipedia states without deriving.
+    let medium = [
+        small.clone(),
+        vec![
+            "wikipedia_en_top_nopic",
+            "wikipedia_en_computer_nopic",
+            "wikipedia_en_physics_nopic",
+            "wikipedia_en_chemistry_nopic",
+            "wikipedia_en_mathematics_nopic",
+            "proofwiki_en_all_nopic",
+            "docs.python.org_en_all",
+        ],
+    ]
+    .concat();
+    // The rest of Stack Exchange, and the practical shelf: repair guides, emergency
+    // medicine, textbooks. Things you want on a laptop with no signal.
+    let large = [
+        medium.clone(),
+        vec![
+            "askubuntu.com_en_all",
+            "superuser.com_en_all",
+            "serverfault.com_en_all",
+            "wikipedia_en_medicine_nopic",
+            "wikem_en_all_nopic",
+            "ifixit_en_all",
+            "wikibooks_en_all_nopic",
+            "wikivoyage_en_all_nopic",
+        ],
+    ]
+    .concat();
+    // All of Wikipedia, all of Stack Overflow, every word in the language. Named honestly.
+    // TED and Khan Academy are deliberately absent at every tier: they are video, and 82 GB
+    // of transcripts answers fewer questions than 28 MB of man pages.
+    let huge = [
+        large.clone(),
+        vec!["wikipedia_en_all_nopic", "stackoverflow.com_en_all", "wiktionary_en_all_nopic"],
+    ]
+    .concat();
+    match name {
+        "mini" => Some((mini, "man pages and developer reference — commands and APIs")),
+        "small" => Some((small, "+ 73k man pages, distro wikis, a general-knowledge floor")),
+        "medium" => Some((medium, "+ encyclopedia coverage — what NOTES.md was measured on")),
+        "large" => Some((large, "+ Stack Exchange, repair guides, emergency medicine, textbooks")),
+        "huge" => Some((huge, "+ all of Wikipedia, all of Stack Overflow, all of Wiktionary")),
+        _ => None,
+    }
+}
+
+/// The newest catalogued edition of each key in a pack, minus what is already mounted, with
+/// the download total. Resolution is by undated key, so a pack never re-fetches a book the
+/// user already has in a newer edition than the pack was written against.
+///
+/// `missing` is the fourth return for a reason: a pack key that matches nothing in the
+/// catalogue — renamed upstream, or mistyped here — would otherwise vanish from the plan and
+/// the pack would quietly install a book less than it promises.
+pub struct Plan {
+    pub want: Vec<(String, u64)>,
+    pub present: Vec<String>,
+    pub missing: Vec<String>,
+    pub bytes: u64,
+}
+
+pub fn pack_plan(zim: &Path, entries: &[Entry], keys: &[&str]) -> Plan {
+    let have: Vec<String> = local(zim);
+    let mut p = Plan { want: Vec::new(), present: Vec::new(), missing: Vec::new(), bytes: 0 };
+    for key in keys {
+        if have.iter().any(|h| DATED.captures(h).map(|c| c[1].to_string()).as_deref() == Some(key)) {
+            p.present.push((*key).to_string());
+            continue;
+        }
+        match entries.iter().filter(|e| e.key() == *key).max_by_key(|e| e.date()) {
+            Some(e) => {
+                p.bytes += e.bytes;
+                p.want.push((e.name.clone(), e.bytes));
+            }
+            None => p.missing.push((*key).to_string()),
+        }
+    }
+    p
+}

@@ -159,6 +159,7 @@ fn usage() {
          \n\
          tny --corpus list            mounted ZIM files\n\
          tny --corpus search <text>   find ZIMs in the kiwix library\n\
+         tny --corpus pack [name]     download a whole shelf: mini small medium large huge\n\
          tny --corpus add <name>      download a ZIM (resumable, byte-verified)\n\
          tny --corpus update          check the library for newer editions\n\
          \n\
@@ -240,6 +241,72 @@ fn corpus_cmd(cfg: &Cfg, args: &[String]) -> Result<i32, String> {
             remount(cfg);
             Ok(0)
         }
+        "pack" => {
+            let entries = match corpus::cached(&cfg.cache) {
+                Some(e) => e,
+                None => corpus::fetch(&cfg.cache)?,
+            };
+            let Some(name) = args.get(1) else {
+                println!("tny --corpus pack <name>\n");
+                for p in corpus::PACK_NAMES {
+                    let (keys, what) = corpus::pack(p).expect("named pack exists");
+                    let plan = corpus::pack_plan(&cfg.zim, &entries, &keys);
+                    println!(
+                        "  {:<7} {:>9} to fetch   {} books, {} already here\n          {}",
+                        p,
+                        human_bytes(plan.bytes),
+                        keys.len(),
+                        plan.present.len(),
+                        what
+                    );
+                    if !plan.missing.is_empty() {
+                        eprintln!("          not in the catalog: {}", plan.missing.join(", "));
+                    }
+                }
+                return Ok(0);
+            };
+            let (keys, _) = corpus::pack(name)
+                .ok_or_else(|| format!("no pack {name:?} — {}", corpus::PACK_NAMES.join(", ")))?;
+            let plan = corpus::pack_plan(&cfg.zim, &entries, &keys);
+            let want = plan.want;
+            if !plan.missing.is_empty() {
+                eprintln!("tny: not in the catalog, skipping: {}", plan.missing.join(", "));
+            }
+            if want.is_empty() {
+                println!("pack {name} is complete — all {} books are mounted", plan.present.len());
+                return Ok(0);
+            }
+            println!("pack {name}: {} to download, {}", want.len(), human_bytes(plan.bytes));
+            for (n, b) in &want {
+                println!("  {:<40} {:>9}", n, human_bytes(*b));
+            }
+            // A pack can be tens of gigabytes. Never start that without a keypress, and
+            // never ask for one when nobody is watching (a script gets the plan and stops).
+            if !std::io::stdin().is_terminal() {
+                eprintln!("tny: not a terminal — re-run interactively to confirm");
+                return Ok(0);
+            }
+            eprint!("download? [y/N] ");
+            std::io::stderr().flush().ok();
+            if !matches!(key(), Some(b'y') | Some(b'Y')) {
+                eprintln!("no");
+                return Ok(0);
+            }
+            eprintln!("yes");
+            let mut failed = 0;
+            for (i, (n, _)) in want.iter().enumerate() {
+                eprintln!("\n[{}/{}] {n}", i + 1, want.len());
+                if let Err(e) = corpus::add(&cfg.zim, &cfg.cache, n) {
+                    eprintln!("tny: {n} failed — {e}");
+                    failed += 1;
+                }
+            }
+            remount(cfg);
+            if failed > 0 {
+                eprintln!("\n{failed} of {} failed — re-run to resume", want.len());
+            }
+            Ok(if failed > 0 { 3 } else { 0 })
+        }
         "update" => {
             let entries = corpus::fetch(&cfg.cache)?;
             let stale = corpus::outdated(&cfg.zim, &entries);
@@ -254,8 +321,84 @@ fn corpus_cmd(cfg: &Cfg, args: &[String]) -> Result<i32, String> {
             }
             Ok(0)
         }
-        other => Err(format!("unknown corpus command {other:?} — list, search, add, update")),
+        other => Err(format!("unknown corpus command {other:?} — list, search, add, pack, update")),
     }
+}
+
+/// F88: `--corpus update` only ever warned, and only when the user thought to run it, so a
+/// library quietly ages until someone notices an answer citing a two-year-old page. The check
+/// comes to the user instead — after the answer, never before it, because nobody asked a
+/// question in order to be told about downloads.
+///
+/// Weekly at most, and declining snoozes it for another week: a prompt that appears every
+/// time is a prompt that gets answered without reading. Offline or catalog fetch failing is
+/// not an error here — it silently counts as "checked" so a laptop on a train stays quiet.
+const UPDATE_EVERY: u64 = 7 * 24 * 60 * 60;
+
+fn maybe_offer_update(cfg: &Cfg) {
+    let path = cfg.cache.join("update.json");
+    let state: serde_json::Value = std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_else(|| serde_json::json!({}));
+    let now = now_secs();
+    if now.saturating_sub(state["checked"].as_u64().unwrap_or(0)) < UPDATE_EVERY {
+        return;
+    }
+    let mark = |asked: bool| {
+        let _ = std::fs::write(
+            &path,
+            serde_json::json!({ "checked": now, "asked": asked }).to_string(),
+        );
+    };
+    let Ok(entries) = corpus::fetch(&cfg.cache) else {
+        mark(false);
+        return;
+    };
+    let stale = corpus::outdated(&cfg.zim, &entries);
+    corpus::write_stale_note(&cfg.cache, &stale);
+    mark(!stale.is_empty());
+    if stale.is_empty() {
+        return;
+    }
+    let bytes: u64 = stale
+        .iter()
+        .filter_map(|(k, _, d)| entries.iter().find(|e| e.key() == *k && e.date() == *d))
+        .map(|e| e.bytes)
+        .sum();
+    eprintln!(
+        "\n\x1b[2m  {} newer edition{} available ({}): {}\x1b[0m",
+        stale.len(),
+        if stale.len() == 1 { "" } else { "s" },
+        human_bytes(bytes),
+        stale.iter().map(|(k, _, _)| k.as_str()).collect::<Vec<_>>().join(", ")
+    );
+    eprint!("  update now? [y/N] ");
+    std::io::stderr().flush().ok();
+    if !matches!(key(), Some(b'y') | Some(b'Y')) {
+        eprintln!("not now — asking again in a week");
+        return;
+    }
+    eprintln!("yes");
+    for (k, _, d) in &stale {
+        if let Some(e) = entries.iter().find(|e| e.key() == *k && e.date() == *d) {
+            if let Err(err) = corpus::add(&cfg.zim, &cfg.cache, &e.name) {
+                eprintln!("tny: {} failed — {err}", e.name);
+            }
+        }
+    }
+    corpus::write_stale_note(&cfg.cache, &[]);
+    remount(cfg);
+}
+
+fn human_bytes(b: u64) -> String {
+    const U: [(&str, u64); 3] = [("GB", 1 << 30), ("MB", 1 << 20), ("KB", 1 << 10)];
+    for (unit, div) in U {
+        if b >= div {
+            return format!("{:.1} {unit}", b as f64 / div as f64);
+        }
+    }
+    format!("{b} B")
 }
 
 // ------------------------------------------------------------------ the pipeline
@@ -354,7 +497,13 @@ fn run(cfg: &Cfg, question: &str, follow: bool) -> Result<i32, String> {
             && !cfg.rank_only
             && !cfg.dump
             && !cfg.context;
-        if !interactive || sources.is_empty() {
+        if !interactive {
+            return Ok(code);
+        }
+        // After the answer, and only here: a check that delays an answer is a check that
+        // gets disabled.
+        maybe_offer_update(cfg);
+        if sources.is_empty() {
             return Ok(code);
         }
         loop {
@@ -963,10 +1112,11 @@ fn now_secs() -> u64 {
         .unwrap_or(0)
 }
 
-/// Thirty days. ZIM dumps are rebuilt roughly monthly and `tny --corpus` replaces them in
-/// place, so an answer that outlives its source would be quoting a page that no longer says
-/// it. The book list in the key catches an added or removed corpus; this catches a refreshed
-/// one, which keeps the same name.
+/// Thirty days — and not the main invalidation. Corpora carry their edition date in the
+/// filename (`wikipedia_en_top_nopic_2026-06`), so a refresh lands as a *new* file and changes
+/// the book list in the key; `--corpus update` only ever warns, it never replaces anything
+/// behind the user's back. The TTL covers what the key cannot see: a file swapped by hand
+/// under the same name, and unbounded growth in a cache nobody prunes.
 const CACHE_TTL: u64 = 30 * 24 * 60 * 60;
 
 fn cached(cfg: &Cfg, key: &str) -> Option<(String, Vec<Source>)> {
