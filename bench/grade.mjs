@@ -43,12 +43,16 @@ export function factOf(needleRe) {
 const hasNum = (ans, n) => new RegExp(String.raw`(?<![\d.,])${n.replace(".", "\\.")}(?![\d])`).test(ans.replace(/,/g, ""));
 const hasWord = (ans, words) => words.some(w => new RegExp(String.raw`\b${w}`, "i").test(ans));
 
-// Three outcomes, and the difference between the last two is the whole point of the grounding
-// rules (F27/F44/F45): a refusal is safe, a confident wrong answer is not.
+// Four outcomes, and the difference between WRONG and REFUSED is the whole point of the
+// grounding rules (F27/F44/F45): a refusal is safe, a confident wrong answer is not.
 //   ok        the fact is in the answer
 //   REFUSED   the arm declined ("not found" / rejected)
 //   WRONG     an answer that does not carry the fact
+//   ERROR     the arm never answered — F107: a 300 s request timeout on the 4B produced an
+//             empty answer, and counting those as refusals credited the model with judgement
+//             it never exercised. Infrastructure failures are their own column.
 export function verdictOf(ans, err, needleRe, expectRe) {
+  if (/chat request failed|chat body|chat json|kiwix|not responding/.test(err ?? "")) return "ERROR";
   const refused = /^not found$/im.test(ans) || ans.trim() === "" || /rejected/.test(err ?? "");
   // An authored `expectRe` grades the answer directly: it was written against the source
   // article to accept any paraphrase of the fact and reject the plausible wrong answer, which
@@ -63,19 +67,20 @@ export function tallyOf() {
   const t = {};
   return {
     add(set, verdict, ms) {
-      t[set] ??= { ok: 0, REFUSED: 0, WRONG: 0, n: 0, ms: 0 };
+      t[set] ??= { ok: 0, REFUSED: 0, WRONG: 0, ERROR: 0, n: 0, ms: 0 };
       t[set][verdict]++;
       t[set].n++;
       t[set].ms += ms;
     },
     report(label) {
       console.log("");
-      let C = 0, R = 0, W = 0, N = 0, ms = 0;
+      let C = 0, R = 0, W = 0, E = 0, N = 0, ms = 0;
       for (const [set, r] of Object.entries(t)) {
-        console.log(`${set.padEnd(5)} correct ${r.ok}/${r.n} refused ${r.REFUSED} wrong ${r.WRONG} ${(r.ms / r.n / 1000).toFixed(1)}s per answer`);
-        C += r.ok; R += r.REFUSED; W += r.WRONG; N += r.n; ms += r.ms;
+        const errs = r.ERROR ? ` errored ${r.ERROR}` : "";
+        console.log(`${set.padEnd(5)} correct ${r.ok}/${r.n} refused ${r.REFUSED} wrong ${r.WRONG}${errs} ${(r.ms / r.n / 1000).toFixed(1)}s per answer`);
+        C += r.ok; R += r.REFUSED; W += r.WRONG; E += r.ERROR; N += r.n; ms += r.ms;
       }
-      console.log(`TOTAL ${label} correct ${C}/${N} (${((C / N) * 100).toFixed(0)}%) refused ${R} wrong ${W} ${(ms / N / 1000).toFixed(2)}s/answer ${(ms / 60000).toFixed(1)} min`);
+      console.log(`TOTAL ${label} correct ${C}/${N} (${((C / N) * 100).toFixed(0)}%) refused ${R} wrong ${W}${E ? ` errored ${E}` : ""} ${(ms / N / 1000).toFixed(2)}s/answer ${(ms / 60000).toFixed(1)} min`);
     },
   };
 }

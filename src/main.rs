@@ -1346,8 +1346,13 @@ fn ask(cfg: &Cfg, question: &str, reference: &str, prev: &[(String, String)]) ->
         "max_tokens": cfg.len.tokens(),
         "chat_template_kwargs": { "enable_thinking": false },
     });
+    // F107: 300 s silently converted the 4B's slowest answers into "not found" — the request
+    // died, the caller saw an empty answer, and the benchmark scored four *timeouts* as
+    // refusals. The ceiling has to clear the slowest model anyone can select: the 4B needs
+    // 328 s for a 900-token prompt on this CPU, so 20 minutes covers a bigger one on a worse
+    // machine, and a real hang is still bounded.
     let resp = ureq::post(&format!("{}/v1/chat/completions", cfg.chat))
-        .timeout(Duration::from_secs(300))
+        .timeout(Duration::from_secs(1200))
         .set("Content-Type", "application/json")
         .send_string(&body.to_string())
         .map_err(|e| format!("chat request failed: {e}"))?

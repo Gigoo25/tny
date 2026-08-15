@@ -19,8 +19,13 @@ const regrade = process.argv.includes("--regrade");
 const cache = await Bun.file(CACHE).exists() ? JSON.parse(await Bun.file(CACHE).text()) : {};
 const tally = tallyOf();
 
+// F107: `--resume` reuses answers already on disk and only pays for the missing ones. A 4B
+// pass over 18 cases is 55 minutes; without this, one timeout means paying all of it again.
+const resume = process.argv.includes("--resume");
+
 async function answerOf(query) {
   if (regrade) return cache[query] ?? { ans: "", err: "" };
+  if (resume && (cache[query]?.ans ?? "").trim() !== "") return cache[query];
   // --fresh: F85 caches answers on disk, and a benchmark that reads its own cache measures
   // the cache. Every case here must pay the model.
   const p = Bun.spawn(["./target/release/tny", "--fresh", query], { env: TNY_ENV, stdout: "pipe", stderr: "pipe" });

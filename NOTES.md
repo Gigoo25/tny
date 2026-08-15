@@ -2489,6 +2489,42 @@ Two things came out of it:
 The general shape: a persisted user preference is right for a daily tool and poison for a
 benchmark, and the benchmark is the one that has to defend itself.
 
+## F107 — 4B on this machine: fewer wrong answers, fewer answers
+
+Same 18 instructional cases, same corpus, same context (medium, ~900 tokens), 0.8B Q8_0
+against Qwen3.5-4B-Q4_K_M:
+
+| | 0.8B Q8_0 | 4B Q4_K_M |
+|---|---|---|
+| correct | **11/18** | 9/18, plus 4 never answered |
+| **wrong** | 5 | **2** |
+| refused | 2 | 3 |
+| timed out | 0 | 4 |
+| per answer | **48.7 s** | 181.8 s |
+| memory | fits | 2.5 GB → 6.5 GB of swap in use, continuous paging |
+
+It halved the wrong answers, which is the failure that matters for a tool whose output gets
+pasted into a shell (F92: a refusal is safe, a confident wrong command is not). It also
+answered two fewer questions and cost 3.7× the wall clock, on a box where it does not fit.
+
+Three things the run exposed that were not about the model at all:
+
+- **A 300 s request ceiling scored four timeouts as refusals.** The request died, the caller
+  saw an empty answer, and the grader credited the model with judgement it never exercised.
+  The ceiling is 1200 s now, and `verdictOf` has an `ERROR` column: infrastructure failures
+  are not model behaviour and must never be summed with them.
+- **The benchmark cache only wrote at the end** (F106), so the first 4B run — 13 of 18 cases,
+  an hour of compute — left nothing on disk when the harness timed out. It writes through per
+  case, and `--resume` pays only for the answers that are missing.
+- **The 4B refuses in prose**: "The provided reference material does not contain instructions
+  on how to…". Graded WRONG, because the grader only recognises a literal `not found`. Its
+  true wrong count is lower than 2, and the grader needs to treat a prose refusal as a
+  refusal — untested, and the 4 outstanding cases are still unrun.
+
+**Recommendation: keep 0.8B as the default.** 4B is worth having behind `--model 4b` for the
+case where a wrong answer is expensive and four minutes is acceptable, and it will look
+different on a machine with enough RAM to hold it — which this one does not have.
+
 ## Exploration backlog — speed
 
 The cost model, measured (0.8B Q8_0, 4 threads, this CPU):
