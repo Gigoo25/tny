@@ -280,14 +280,43 @@ fn run(cfg: &Cfg, question: &str, follow: bool) -> Result<i32, String> {
     // cut to its most informative 8 and widened only if that finds nothing — the backoff is
     // free on every query that already works, and the two extra searches cost ~300 ms on the
     // ones that do not. Ranking still sees the *whole* question: only the search is cut.
-    let mut query = select_terms(&prep(&retrieval_q), search_terms());
+    // F71: rarity was measured and rejected as a term-selection objective. Real document
+    // frequency, summed per book over every mounted ZIM and cached on disk, ordered terms
+    // correctly - `the` 2500, `uname` 556, `harina` 107 - and selecting the rarest eight
+    // scored 37/67 against the shape heuristic's 63/67, reproduced on one server instance.
+    // Xapian already weights rarity inside the engine, so pre-selecting rare terms counts it
+    // twice and spends the query budget on incidentals; what the engine cannot recover is
+    // topic coverage. That is the second time an IDF signal has lost here, and the first
+    // (23/58 against 32/58) was blamed on biased statistics. The statistics were fine.
+    let prepped = prep(&retrieval_q);
+    let mut query = select_terms(&prepped, search_terms());
     let mut cands = search_union(&cfg.kiwix, &query, &books, PER_BOOK);
+    // F72: an empty shortlist means one of two very different things, and tny reported the
+    // wrong one. kiwix-serve dies under sustained load on a small machine — measured here
+    // repeatedly, SIGSEGV then SIGABRT with 4.5 GB of ZIMs and 400 MB of free RAM — after
+    // which every book's search fails silently and the user is told "no local corpus matched",
+    // about an answer sitting on their disk. Ask whether the server is alive before believing
+    // its silence, and give it one restart.
+    if cands.is_empty() && !up(&format!("{}/", cfg.kiwix)) {
+        eprintln!("tny: kiwix-serve is not responding — restarting it");
+        serve_kiwix(cfg)?;
+        cands = search_union(&cfg.kiwix, &query, &books, PER_BOOK);
+    }
+    // F70: widening a thin shortlist was measured and rejected. Three of five held-out misses
+    // had six candidates or fewer, so backing off at twelve looked obvious — and it scored
+    // *worse*, 60/67 against 62/67, because the extra candidates outranked the answer. Recall
+    // was never the constraint: every one of those pages was already inside its own book's
+    // top 50. Ranking precision is the constraint, so the backoff stays empty-only.
     for cap in [5, 3] {
         if !cands.is_empty() {
             break;
         }
-        query = select_terms(&prep(&retrieval_q), cap);
-        cands = search_union(&cfg.kiwix, &query, &books, PER_BOOK);
+        query = select_terms(&prepped, cap);
+        for c in search_union(&cfg.kiwix, &query, &books, PER_BOOK) {
+            if !cands.iter().any(|x| x.book == c.book && x.path == c.path) {
+                cands.push(c);
+            }
+        }
     }
     let t_search = t.elapsed();
     if cands.is_empty() {

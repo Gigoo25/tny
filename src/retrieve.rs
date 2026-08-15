@@ -135,30 +135,47 @@ pub fn prep(q: &str) -> String {
 /// So the query is cut to its most informative terms, in their original order. Rarity has to
 /// be guessed — kiwix exposes no corpus statistics, and the one attempt to estimate IDF from
 /// the retrieved candidates made ranking worse (23/58 against 32/58), because a biased sample
-/// is not a corpus. What survives instead is shape: a token carrying digits or punctuation is
-/// an identifier (`ls -l`, `ext4`, `40g`, `drwxr-xr-x`) and is never filler; long words are
-/// rarer than short ones; and prose glue that outlived `prep` is worth less than either.
+/// is not a corpus. What survives instead is shape and position.
+///
+/// The first cut of this ranked *any* token with a digit or punctuation as an identifier, and
+/// that was wrong in a way worth keeping written down: asked "Why does uname show x86_64 three
+/// times? This is Ubuntu 12.04.4", it searched for `x86 64 12.04.4.` and found nothing, having
+/// dropped `uname` and `architecture` — the only two words that name the subject. Version
+/// strings and pasted shell output are rare, but they describe the asker's machine, not the
+/// question. A name with letters in it (`ext4`, `x86_64`, `gksudo`) is worth keeping; a run of
+/// digits and dots is not. Position matters for the same reason: people put their subject in
+/// the first clause and their environment in the last.
 pub fn select_terms(q: &str, cap: usize) -> String {
     let words: Vec<&str> = q.split_whitespace().collect();
     if words.len() <= cap {
         return q.to_string();
     }
-    let weight = |w: &str| -> i32 {
+    let weight = |w: &str, i: usize| -> i32 {
         if GLUE.is_match(w) {
-            return -1;
+            return -200;
         }
-        let ident = w.chars().any(|c| c.is_ascii_digit()) || w.contains(['-', '_', '.', '/']);
-        match (ident, w.chars().count()) {
-            (true, _) => 3,
-            (_, n) if n >= 8 => 2,
-            (_, n) if n >= 6 => 1,
+        let letters = w.chars().filter(|c| c.is_alphabetic()).count();
+        let digits = w.chars().filter(|c| c.is_ascii_digit()).count();
+        // `12.04.4`, `3.2.0-59`, `408`. These are *rare*, so real IDF ranks them top — and
+        // they describe the asker's machine, not the question. The veto stays above rarity:
+        // it is about what kiwix can tokenise, not about what is informative.
+        if letters == 0 || digits > letters {
+            return -100;
+        }
+        let named = digits > 0 || w.contains(['-', '_', '/']);
+        let base = match (named, w.chars().count()) {
+            (true, _) => 60,
+            (_, n) if n >= 8 => 40,
+            (_, n) if n >= 6 => 20,
             _ => 0,
-        }
+        };
+        // The subject is stated before the setup, so an early term breaks ties over a late one.
+        base + if i < 8 { 2 } else { 0 }
     };
     let mut ranked: Vec<(usize, &str)> = words.iter().copied().enumerate().collect();
     // Stable by construction: equal weights keep the order the user typed them in, so a
     // truncated query still reads as a phrase rather than a bag.
-    ranked.sort_by_key(|(i, w)| (-weight(w), *i));
+    ranked.sort_by_key(|&(i, w)| (-weight(w, i), i));
     let mut keep: Vec<usize> = ranked.into_iter().take(cap).map(|(i, _)| i).collect();
     keep.sort_unstable();
     keep.iter().map(|&i| words[i]).collect::<Vec<_>>().join(" ")
