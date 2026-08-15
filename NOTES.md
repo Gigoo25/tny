@@ -2364,7 +2364,9 @@ density and a cross-reference is where the term is densest in someone else's sen
 
 The definition is the occurrence followed by prose; a cross-reference is followed by
 punctuation or a lowercase continuation. `flag_anchor` scores the occurrences that way and
-centres the window on the winner. Same 3,249-char context, answer now present.
+centres the window on the winner. Same 3,249-char context, answer now present — and measured
+across the fixture it is a gain, not just a fix for one page: **context has the fact 48/58,
+up from 46** (F105 for why that number first looked like a regression).
 
 ## F100 — a wider window around an anchored flag is a *worse* window
 
@@ -2466,6 +2468,26 @@ clock — `q` still quits while the model is 40 s into an answer.
 
 A terminal gets the TUI; a pipe gets a line of text. `--context`, `--rank`, `--dump` and
 every benchmark redirect stdout, so they behave exactly as before.
+
+## F105 — a measurement that inherits ambient state is not a measurement
+
+The context guard dropped from 46/58 to 41/58 immediately after F93 landed, and the obvious
+suspect was the new flag anchor. It was not. `~/.cache/tny/prefs` still held `fast · low ·
+4b` from testing the persistence feature, and every `tny --context` the guard spawned
+silently ran at one article instead of three — contexts of 1,250 chars where the fixture
+expects ~3,200. Nothing in the output said the run had been reconfigured.
+
+Two things came out of it:
+
+- `bench/env.mjs` pins `TNY_MODE`, `TNY_LEN` and `TNY_MODEL` on every spawn of the binary.
+  An explicitly exported value still wins, so `TNY_MODEL=4b bun bench/answer-cli.mjs`
+  measures the 4B — the pin is a default, not a cage.
+- With the pin, the flag anchor is a **gain, not a regression: 48/58, up from 46**. Ranking
+  is unmoved (`article@1 34/58`, `shortlist 48/58`, `book@1 44/58`), held-out unmoved
+  (`title 55/57`, `body 54/57`, `ref 18/18`, `evidence 50/55`).
+
+The general shape: a persisted user preference is right for a daily tool and poison for a
+benchmark, and the benchmark is the one that has to defend itself.
 
 ## Exploration backlog — speed
 

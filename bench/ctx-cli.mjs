@@ -10,6 +10,7 @@
 // A case counts as IN-CTX if either the article-prose needle or the authored answer regex
 // matches the slice: the needle can be phrased for prose the slice cut, and vice versa.
 import { EXPECT } from "./expect.mjs";
+import { TNY_ENV } from "./env.mjs";
 
 const SETS = [["instructional", "instructional"], ["qa", "qa"], ["general", "general"], ["ambiguous", null]];
 const only = process.argv.slice(2).find(a => !a.startsWith("-"));
@@ -27,7 +28,7 @@ for (const [f, k] of SETS) {
     // `--failing` narrows to the cases that got the answer wrong, which is the working set
     // while a section-selection change is under test.
     if (failing && exp && exp.test((cache[c[0]]?.ans ?? "").replace(/\s+/g, " "))) continue;
-    const p = Bun.spawn(["./target/release/tny", "--context", c[0]], { stdout: "pipe", stderr: "pipe" });
+    const p = Bun.spawn(["./target/release/tny", "--context", c[0]], { env: TNY_ENV, stdout: "pipe", stderr: "pipe" });
     const ctx = await new Response(p.stdout).text();
     await p.exited;
     const hit = c[4].test(ctx) || (exp && exp.test(ctx));

@@ -4,6 +4,7 @@
 // user runs. Verbose mode prints `book · title · §sections` to stderr, so the CLI's own
 // choice is observable without a second code path.
 import { CASES as INST } from "./fixture-instructional.mjs";
+import { TNY_ENV } from "./env.mjs";
 import { CASES as QA } from "./fixture-qa.mjs";
 import { CASES as GEN } from "./fixture-general.mjs";
 import { CASES as AMB } from "./fixture-ambiguous.mjs";
@@ -32,7 +33,7 @@ const text = async (book, path) => {
 // stops being usable. Four at a time on a 4-core box, which is what tny itself would face
 // under any real concurrent use.
 const one = async ([set, query, , wantBook, titleRe, needleRe]) => {
-  const p = Bun.spawn(["./target/release/tny", "--rank", query], { stdout: "pipe", stderr: "pipe" });
+  const p = Bun.spawn(["./target/release/tny", "--rank", query], { env: TNY_ENV, stdout: "pipe", stderr: "pipe" });
   const out = await new Response(p.stdout).text();
   await new Response(p.stderr).text();
   await p.exited;

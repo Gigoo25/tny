@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import { TNY_ENV } from "./env.mjs";
 // Held-out measurement on pages nobody in this repo chose.
 //
 // The 58 hand-built cases are a regression guard: every scorer weight was tuned against them,
@@ -63,7 +64,7 @@ function evidenceTerms(answer, asked) {
 }
 
 const ctxFor = async (q) => {
-  const p = Bun.spawn(["./target/release/tny", "--context", q], { stdout: "pipe", stderr: "pipe" });
+  const p = Bun.spawn(["./target/release/tny", "--context", q], { env: TNY_ENV, stdout: "pipe", stderr: "pipe" });
   const out = await new Response(p.stdout).text();
   await p.exited;
   return out.toLowerCase();

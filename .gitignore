@@ -14,3 +14,5 @@ bench/.sweep-cache.json
 bench/.contexts.json
 bench/.embeds.json
 bench/.shortlists.json
+bench/.answers-08b-inst.json
+bench/.answers-4b.json

@@ -11,6 +11,7 @@
 //   answer@3   the verified answer text appears in one of the top 3 articles — this is what
 //              tny actually sends the model (F58), so it is the number that predicts quality
 import { CASES as INST } from "./fixture-instructional.mjs";
+import { TNY_ENV } from "./env.mjs";
 import { CASES as QA } from "./fixture-qa.mjs";
 import { CASES as GEN } from "./fixture-general.mjs";
 import { CASES as AMB } from "./fixture-ambiguous.mjs";
@@ -22,7 +23,7 @@ const CASES = [...INST.map(c => ["inst", ...c]), ...QA.map(c => ["qa", ...c]),
 
 // ---------------------------------------------------------------- cache build
 const sh = async (args) => {
-  const p = Bun.spawn(args, { stdout: "pipe", stderr: "pipe" });
+  const p = Bun.spawn(args, { env: TNY_ENV, stdout: "pipe", stderr: "pipe" });
   const out = await new Response(p.stdout).text();
   await new Response(p.stderr).text();
   await p.exited;

@@ -7,6 +7,7 @@
 // The grader lives in grade.mjs, shared with the no-model arm (bench/extract-cli.mjs), so the
 // two are directly comparable: same cases, same regexes, same verdicts, different answerer.
 import { CASES, verdictOf, tallyOf } from "./grade.mjs";
+import { TNY_ENV } from "./env.mjs";
 
 const only = process.argv.slice(2).find(a => !a.startsWith("-"));
 // Generation costs ~20 s per case, so a grader change must never re-pay it: answers are cached
@@ -22,7 +23,7 @@ async function answerOf(query) {
   if (regrade) return cache[query] ?? { ans: "", err: "" };
   // --fresh: F85 caches answers on disk, and a benchmark that reads its own cache measures
   // the cache. Every case here must pay the model.
-  const p = Bun.spawn(["./target/release/tny", "--fresh", query], { stdout: "pipe", stderr: "pipe" });
+  const p = Bun.spawn(["./target/release/tny", "--fresh", query], { env: TNY_ENV, stdout: "pipe", stderr: "pipe" });
   const ans = (await new Response(p.stdout).text()).trim();
   const err = await new Response(p.stderr).text();
   await p.exited;

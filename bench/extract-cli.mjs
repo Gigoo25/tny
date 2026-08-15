@@ -15,6 +15,7 @@
 //   bun bench/extract-cli.mjs --sweep    every variant, offline, from the cache
 //   bun bench/extract-cli.mjs --rebuild  re-fetch contexts
 import { CASES, verdictOf, tallyOf } from "./grade.mjs";
+import { TNY_ENV } from "./env.mjs";
 
 const CACHE = "bench/.contexts.json";
 const rebuild = process.argv.includes("--rebuild");
@@ -24,7 +25,7 @@ const cache = !rebuild && await Bun.file(CACHE).exists() ? JSON.parse(await Bun.
 
 async function contextOf(query) {
   if (cache[query] != null) return cache[query];
-  const p = Bun.spawn(["./target/release/tny", "--context", query], { stdout: "pipe", stderr: "pipe" });
+  const p = Bun.spawn(["./target/release/tny", "--context", query], { env: TNY_ENV, stdout: "pipe", stderr: "pipe" });
   const out = (await new Response(p.stdout).text()).trim();
   await p.exited;
   cache[query] = out;

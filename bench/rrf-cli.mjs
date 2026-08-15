@@ -5,6 +5,7 @@
 // finds where the right article landed, and when it is not first, what beat it — the only way
 // to tell a scoring bug (the answer is there, mis-ordered) from a retrieval one.
 import { CASES } from "./grade.mjs";
+import { TNY_ENV } from "./env.mjs";
 
 const CACHE = "bench/.shortlists.json";
 const rebuild = process.argv.includes("--rebuild");
@@ -12,7 +13,7 @@ const cache = !rebuild && await Bun.file(CACHE).exists() ? JSON.parse(await Bun.
 
 async function shortlist(query) {
   if (cache[query]) return cache[query];
-  const p = Bun.spawn(["./target/release/tny", "--rank", query], { stdout: "pipe", stderr: "pipe" });
+  const p = Bun.spawn(["./target/release/tny", "--rank", query], { env: TNY_ENV, stdout: "pipe", stderr: "pipe" });
   const out = (await new Response(p.stdout).text()).trim();
   await p.exited;
   cache[query] = out
