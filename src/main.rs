@@ -12,7 +12,7 @@ mod ground;
 mod retrieve;
 
 use ground::{command_vocab, html2txt, split_compare, ungrounded, ungrounded_detail, ungrounded_shape};
-use retrieve::{article, pick_sections, prep, rank_articles, search_union};
+use retrieve::{article, pick_sections, prep, rank_articles, search_union, select_terms};
 use std::io::Write;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
@@ -42,6 +42,9 @@ const TOP_ARTICLES: usize = 3;
 // further, and neither 8 nor 12 disturbs the ranking: article@1 and answer@3 are unmoved, so
 // the extra candidates are inert rather than noise.
 const PER_BOOK: usize = 8;
+/// F68: how many terms reach kiwix. Measured on one book: 8 terms returned the most hits of
+/// any length tried, and 24 returned none.
+const SEARCH_TERMS: usize = 8;
 
 const NEED_LLAMA: &str = "llama-server not on PATH. Install llama.cpp:\n  \
     arch:   pacman -S llama.cpp\n  \
@@ -270,9 +273,19 @@ fn run(cfg: &Cfg, question: &str, follow: bool) -> Result<i32, String> {
     }
 
     let t = Instant::now();
-    let query = prep(&retrieval_q);
-    // F49: ask every book, then rank — one global query buries a small book's answer.
-    let cands = search_union(&cfg.kiwix, &query, &books, PER_BOOK);
+    // F68: a sentence is not a search query. kiwix scores 0 hits at 24 terms, so the query is
+    // cut to its most informative 8 and widened only if that finds nothing — the backoff is
+    // free on every query that already works, and the two extra searches cost ~300 ms on the
+    // ones that do not. Ranking still sees the *whole* question: only the search is cut.
+    let mut query = select_terms(&prep(&retrieval_q), SEARCH_TERMS);
+    let mut cands = search_union(&cfg.kiwix, &query, &books, PER_BOOK);
+    for cap in [5, 3] {
+        if !cands.is_empty() {
+            break;
+        }
+        query = select_terms(&prep(&retrieval_q), cap);
+        cands = search_union(&cfg.kiwix, &query, &books, PER_BOOK);
+    }
     let t_search = t.elapsed();
     if cands.is_empty() {
         return Ok(no_local_match(cfg, &query));

@@ -55,6 +55,9 @@ re!(DIAGNOSE = r"(?i)\b(error|errors|fail|failed|failing|refused|denied|cannot|c
 re!(HOWTO_Q = r"(?i)^(how (do|can|would) i|how to|what command)\b|^(create|set|mount|encrypt|generate|check|list|install|enable|configure|disable|remove|start|stop|make)\b");
 re!(TITLE_TERM = r"[a-z0-9_.:-]{2,}");
 re!(TITLE_STOP = r"^(the|a|an|of|in|to|and|or|for)$");
+// F68: prose glue that survives `prep` — it is not a stopword (it can be a section head or a
+// title term), but among twenty candidates it is the first thing to drop from a search query.
+re!(GLUE = r"^(am|is|are|was|were|be|been|being|have|has|had|do|does|did|will|would|can|could|should|may|might|must|my|me|it|its|this|that|these|those|there|here|then|than|but|so|if|when|while|from|into|onto|with|without|about|like|just|also|very|really|some|any|all|not|only|even|still|want|wanted|need|needed|try|tried|trying|get|got|getting|see|seen|know|think|seems|new|old|good|bad)$");
 // F64: apparatus, not content — citation and navigation sections that answer nothing but match
 // query terms densely because they are lists of titles.
 re!(APPARATUS = r"(?i)^\s*(references?|external links?|see also|further reading|bibliography|notes?|citations?|sources?|footnotes?|related pages?|external resources?)\s*$");
@@ -122,6 +125,43 @@ pub fn prep(q: &str) -> String {
         .filter(|w| !STOP.is_match(w))
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+/// F68: kiwix returns *nothing* for a long query. Measured on one book: 4 terms → 13 hits,
+/// 8 → 60, 12 → 40, 20 → 6, 24 → **0**. Every fixture case is a headline question of six
+/// words, so this never showed; every real question is a sentence, and the held-out arm that
+/// asks with the user's own words routed 18/53 against 52/53 for the page's own title.
+///
+/// So the query is cut to its most informative terms, in their original order. Rarity has to
+/// be guessed — kiwix exposes no corpus statistics, and the one attempt to estimate IDF from
+/// the retrieved candidates made ranking worse (23/58 against 32/58), because a biased sample
+/// is not a corpus. What survives instead is shape: a token carrying digits or punctuation is
+/// an identifier (`ls -l`, `ext4`, `40g`, `drwxr-xr-x`) and is never filler; long words are
+/// rarer than short ones; and prose glue that outlived `prep` is worth less than either.
+pub fn select_terms(q: &str, cap: usize) -> String {
+    let words: Vec<&str> = q.split_whitespace().collect();
+    if words.len() <= cap {
+        return q.to_string();
+    }
+    let weight = |w: &str| -> i32 {
+        if GLUE.is_match(w) {
+            return -1;
+        }
+        let ident = w.chars().any(|c| c.is_ascii_digit()) || w.contains(['-', '_', '.', '/']);
+        match (ident, w.chars().count()) {
+            (true, _) => 3,
+            (_, n) if n >= 8 => 2,
+            (_, n) if n >= 6 => 1,
+            _ => 0,
+        }
+    };
+    let mut ranked: Vec<(usize, &str)> = words.iter().copied().enumerate().collect();
+    // Stable by construction: equal weights keep the order the user typed them in, so a
+    // truncated query still reads as a phrase rather than a bag.
+    ranked.sort_by_key(|(i, w)| (-weight(w), *i));
+    let mut keep: Vec<usize> = ranked.into_iter().take(cap).map(|(i, _)| i).collect();
+    keep.sort_unstable();
+    keep.iter().map(|&i| words[i]).collect::<Vec<_>>().join(" ")
 }
 
 pub fn terms(q: &str) -> Vec<String> {
