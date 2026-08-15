@@ -1802,6 +1802,64 @@ Consequence for where to spend next: retrieval is at `article@1 37/58`, `shortli
 `book@1 47/58`, and the product is at 40/58. The gap between shortlist and product is the
 model's extraction, not the search. Chasing rank-1 further buys nothing measurable.
 
+## F67 — the lead was never a section, and the fixture could not see it
+
+`sections_of` iterated *from* the first heading, so every character before it was discarded.
+On Wikipedia that is the definitional sentence: "Jupiter has N known moons", "Kilimanjaro is
+5,895 m high". Asked "how many moons does jupiter have", tny sent §Origin and evolution and
+§Irregular satellites — two sections that mention moons constantly and count none.
+
+Structural, not tuning: the lead was unreachable for **every** query in **every** corpus.
+Fact-in-context on the fixture went 40/58 -> 45/58 from four lines.
+
+The second half was nearly a mistake. `window` centres on the densest run of query terms, so
+the lead arrived cut off mid-sentence; taking its prefix instead fixed Jupiter and would have
+optimised *headline questions* at the cost of deep ones. The lead splits its budget — a third
+for the opening, the rest centred — so both shapes are served. `tny --context` prints the
+exact slice without loading the model, which is how all of this became visible at all.
+
+## F68 — a sentence is not a search query
+
+kiwix returns **nothing** for a long query. Measured directly on one book:
+
+```
+ 4 terms -> 13 hits     12 terms -> 40 hits     24 terms -> 0 hits
+ 8 terms -> 60 hits     20 terms ->  6 hits
+```
+
+Every one of the 58 fixture cases is a six-word headline question, so the fixture is
+structurally incapable of finding this. Real questions are sentences.
+
+`select_terms` keeps the k most informative terms in typed order. Rarity is guessed from
+shape, because kiwix exposes no corpus statistics and the one attempt to estimate IDF from the
+retrieved candidates made ranking *worse* (23/58 against 32/58) — a biased sample is not a
+corpus. Tokens carrying digits or punctuation are identifiers (`ls -l`, `ext4`, `40g`) and
+never filler; long words beat short ones; prose glue that outlived `prep` goes first. Search
+backs off to 5 then 3 terms only when a query finds nothing, so the cost lands on the queries
+that were already failing.
+
+k was tuned on `bench/dev.tsv`, disjoint from the held-out sample (0 rows shared), because
+tuning on the held-out set turns it into a training set. Dev: baseline 57/67, k=6 60/67,
+k=8 62/67, k=12 62/67 — the shorter query wins the tie. Held-out confirmation: body 48/57 ->
+50/57, every other arm unmoved.
+
+## F69 — `shuf --random-source=/dev/zero` is not a random sample
+
+The first version of this measurement reported the term-selection change as **34% -> 87%**.
+That number was wrong, and the bug was in the sampling: a zero-entropy random source makes
+`shuf` degenerate, and it returned an alphabetically clustered block — `a/1000`, `a/10000`,
+and for Wikipedia the articles `!`, `!!!!!!!`, `!--`. Filtered to `questions/<id>/`, that is
+the *oldest* questions on the site: Fedora 3, Ubuntu 10.10, KDE3.
+
+Replaced with systematic sampling (`awk 'NR % 401 == 7'`), which is deterministic, spreads
+across the whole id range, and needs no entropy at all. The honest figures are the ones in
+F68: a real but modest gain, not a transformation.
+
+Determinism was the requirement — a held-out set that reshuffles cannot compare two builds —
+and reaching for a fixed random *source* to get it produced a sample that looked random and
+was not. The measurement of a measurement is not optional: **every number in F68 was produced
+twice, once against a sample that was silently sorted.**
+
 ## Exploration backlog — speed
 
 The cost model, measured (0.8B Q8_0, 4 threads, this CPU):

@@ -43,8 +43,11 @@ const TOP_ARTICLES: usize = 3;
 // the extra candidates are inert rather than noise.
 const PER_BOOK: usize = 8;
 /// F68: how many terms reach kiwix. Measured on one book: 8 terms returned the most hits of
-/// any length tried, and 24 returned none.
-const SEARCH_TERMS: usize = 8;
+/// any length tried, and 24 returned none. Overridable so a sweep costs a run rather than a
+/// rebuild — `TNY_SEARCH_TERMS=999` reproduces the unlimited query this replaced.
+fn search_terms() -> usize {
+    std::env::var("TNY_SEARCH_TERMS").ok().and_then(|v| v.parse().ok()).unwrap_or(8)
+}
 
 const NEED_LLAMA: &str = "llama-server not on PATH. Install llama.cpp:\n  \
     arch:   pacman -S llama.cpp\n  \
@@ -277,7 +280,7 @@ fn run(cfg: &Cfg, question: &str, follow: bool) -> Result<i32, String> {
     // cut to its most informative 8 and widened only if that finds nothing — the backoff is
     // free on every query that already works, and the two extra searches cost ~300 ms on the
     // ones that do not. Ranking still sees the *whole* question: only the search is cut.
-    let mut query = select_terms(&prep(&retrieval_q), SEARCH_TERMS);
+    let mut query = select_terms(&prep(&retrieval_q), search_terms());
     let mut cands = search_union(&cfg.kiwix, &query, &books, PER_BOOK);
     for cap in [5, 3] {
         if !cands.is_empty() {
