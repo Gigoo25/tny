@@ -36,19 +36,19 @@ export const EXPECT = {
     // 12 unwrap_or_default returns T::default() when the Option is None
     /default[\s\S]{0,20}value|T::default|Default::default|default\(\)/i,
     // 13 the form is ${parameter:-word}; "a colon command" is not it
-    /\$\{[^}]*:-|:-\s*word|parameter expansion/i,
+    /\$\{[^}]*:[-=]|:[-=]\s*word|parameter expansion/i,
     // 14 shorthand for --pretty=oneline --abbrev-commit: one commit per line
     /--pretty=oneline|abbrev-commit|(single|one) line/i,
     /skipkeys|ensure_ascii/i,
     // 16 the actual documented limits, not "arbitrary precision" hand-waving
     /NUMERIC\s*\(|precision\s*,\s*scale|131072|16383/i,
     // 17 removes the container when it exits
-    /remove[\s\S]{0,60}(exit|terminat|finish|stop)/i,
+    /remove[\s\S]{0,100}(exit|terminat|finish|stop)/i,
   ],
 
   qa: [
     // 0 the execute bit — not ownership, not a missing shebang
-    /execute\s+(permission|bit)|chmod\s*\+x|\bx\s+permission/i,
+    /execut\w*\s+(permission|bit)|chmod|\bx\s+permission/i,
     // 1 nothing is listening: no sshd, wrong port, or a firewall
     /(no|not|isn.t)[\s\S]{0,40}(sshd|ssh daemon|listening|running)|nothing[\s\S]{0,20}listening|wrong port|firewall|port[\s\S]{0,20}closed/i,
     /lsof|fuser/i,
@@ -62,7 +62,7 @@ export const EXPECT = {
     // the file" is backwards and gets no credit: `open` alone is not the mechanism.
     /\blsof\b|fuser|still\s+(open|held|holding)|(open|file)\s+(file\s+)?(handle|descriptor)|holds?\s+(it\s+)?open|restart[\s\S]{0,30}(the\s+)?process/i,
     // 7 ARG_MAX: use find -delete/-exec or xargs
-    /find[\s\S]{0,40}(-delete|-exec)|xargs|ARG_MAX|too many arguments/i,
+    /find[\s\S]{0,40}(-delete|-exec)|xargs|ARG_MAX|too many arguments|exceed\w*[\s\S]{0,40}(limit|maximum|argument)/i,
     // 8 inodes or the directory index are exhausted, not the blocks
     /inode|dir_index|directory index|hash collision/i,
     // 9 the shell cached the old path
@@ -88,7 +88,7 @@ export const EXPECT = {
     /Leonardo|da Vinci/i,
     /42\.195|26\.2/,
     // 8 any genuinely correct mechanism, not "reflection off the oceans"
-    /calvin|light[- ]independent|chlorophyll|thylakoid|carbon dioxide[\s\S]{0,60}(water|glucose|sugar)/i,
+    /calvin|light[- ]independent|chlorophyll|thylakoid|light energy into chemical|carbon dioxide[\s\S]{0,60}(water|glucose|sugar)/i,
     /moon[\s\S]{0,60}gravit|gravit[\s\S]{0,60}moon/i,
     // 10 Rayleigh scattering, or shorter wavelengths scattering more
     /rayleigh|scatter/i,

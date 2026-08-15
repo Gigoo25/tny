@@ -1860,6 +1860,124 @@ and reaching for a fixed random *source* to get it produced a sample that looked
 was not. The measurement of a measurement is not optional: **every number in F68 was produced
 twice, once against a sample that was silently sorted.**
 
+## F70 — recall was never the constraint
+
+Two changes aimed at the seven held-out questions whose page never surfaced. Both measured on
+the dev split, both reverted:
+
+- **deepen the leading books.** The first pass picks books, the second reads the top three at
+  depth 25 instead of 8 — collection selection with the shortlist as the selector. Dev: 62/67
+  at depth 8, 62/67 at 25, 63/67 at 40. One case for three extra searches per query.
+- **widen a thin shortlist.** Three of the five dev misses had six candidates or fewer, so
+  backing off when the list is thin rather than only when it is empty looked obvious. It
+  scored **worse**: 60/67 against 62/67.
+
+The second result is the useful one. Every missed page was already inside its own book's
+top 50 — kiwix had it all along — so adding candidates could only help if ranking could order
+them, and it cannot. Widening made the answer *lose to the new noise*. Ranking precision is
+the constraint, and no amount of recall substitutes for it.
+
+## F71 — real IDF, built and deleted
+
+`src/df.rs`: document frequency summed per book across every mounted ZIM, cached on disk
+forever because df is a property of the corpus. kiwix's library-wide search cannot supply it
+(it undercounts wildly — `photosynthesis` reports 2 against a per-book sum of 958) but the
+per-book sums are exact and correctly ordered:
+
+```
+the 2500   with 1950   want 1864   know 1107   uname 556   masa 445   harina 107
+```
+
+Selecting the rarest eight terms scored **37/67 against the shape heuristic's 63/67**,
+reproduced twice on one server instance behind a `TNY_DF` switch so no restart could explain
+it. The statistics were right and the objective was wrong: **Xapian already weights rarity
+inside the engine**, so choosing rare terms counts rarity twice and spends the query budget on
+incidentals, while the one thing the engine cannot recover on its own is topic coverage. A
+rare word that names nothing the page is about is a worse query term than a common word that
+names its subject.
+
+That is the second IDF signal to lose here. The first (23/58 against 32/58) was blamed on
+estimating rarity from the retrieved candidates — a biased sample. This time the sample was
+the whole corpus, and it lost anyway, which retires the idea rather than the implementation.
+140 lines deleted.
+
+What survived from the same session is smaller and duller: a version string is not an
+identifier. "Why does uname show x86_64 three times? This is Ubuntu 12.04.4" was searched as
+`x86 64 12.04.4.`, because any token containing a digit ranked top — dropping the only two
+words that name the subject. Numeric-dominated tokens are vetoed, and among equals an early
+term wins, because people state their subject before their setup.
+
+## F72 — a dead server is not an empty corpus
+
+kiwix-serve **dies under sustained load** on this machine: SIGSEGV once, SIGABRT once, with
+4.5 GB of ZIMs mounted against 400 MB of free RAM. Every per-book search then fails silently,
+`cands` comes back empty, and tny printed *"no local corpus matched"* — telling the user their
+corpora lack an answer that is sitting on their disk. Two measurement runs were also silently
+invalidated by it before the cause was clear.
+
+It now asks whether the server is alive before believing its silence, and restarts it once.
+Verified by killing kiwix mid-session: the next query respawns it and returns the right
+shortlist. The same episode is a warning about the harness — a benchmark that cannot tell
+"wrong answer" from "server dead" reports the first and hides the second.
+
+## F73 — where the search stands, measured on questions nobody here wrote
+
+Held-out, sampled from the ZIM index, tuned on a disjoint dev split and confirmed once:
+
+```
+                      before B   after B
+routed by title         55/57     55/57   (96%)  leaky upper bound
+routed by the asker     48/57     54/57   (95%)  what day-to-day use looks like
+routed, wiki/devdocs    18/18     18/18  (100%)  entity lookup across every book
+evidence in the slice   49/55     49/55   (89%)  section selection, given routed
+```
+
+Fixture unmoved throughout: 45/58 fact-in-context, `article@1` 37/58, `shortlist` 48/58.
+
+The remaining retrieval gap is **section selection, not routing**: 6 of 55 routed pages hand
+the model a slice that does not contain the answer. Everything above it is now within a few
+points of its ceiling, and three separate attempts to buy routing with more candidates or
+better term weighting were measured and rejected.
+
+## F74 — the grader moved the number by eight cases without the model changing
+
+After the lead fix the product read **34/58**, down from 40/58, and the first reading was that
+F67 had broken answering. Auditing all 24 failures by hand found that eight were correct
+answers rejected by `bench/expect.mjs`:
+
+- *"a kernel is a component of a computer operating system that serves as an intermediary
+  connecting software to hardware"* — the verb list happened to hold `mediates` but not
+  `intermediary`.
+- *"the script file lacks executable permissions"* — the pattern demanded `execute permission`.
+- *"the `--rm` option removes the container from the Docker daemon's memory pool after the
+  command finishes"* — correct, and 70 characters wide against a 60-character window.
+- *"the turtle shell is made up of numerous bony elements and keratinous scutes"* — a correct
+  biology answer, from an article the fixture had not pinned.
+
+Regrading the **same cached answers** with the widened patterns: **42/58**. Nothing about the
+system changed between 34 and 42.
+
+The graders were authored against one specific answer each (F65), so they encoded that answer's
+wording, and the lead fix changed how answers are phrased. A grader written against today's
+output measures whether the output changed, not whether it is right.
+
+Each widening was judged on the fact first and verified in both directions — every word-sense
+pattern still rejects its sibling sense, checked mechanically. Three were left failing on
+purpose, and they are the evidence the process was not simply admitting whatever arrived:
+"what is an HTTP cookie used *for*" was answered with what a cookie *is*; "how do I let a user
+run commands with sudo" explained what sudo is rather than naming `wheel` or `sudoers`; and
+"what precision does the numeric type have" never gave the limits.
+
+Those last two are the same defect, and it is F67's: **a lead is a definition**. Making it
+reachable answers "what is X" and mis-answers "how do I X". Suppressing the lead per page kind
+was tried and reverted (a Stack Exchange page has no h2 above its question, so its lead runs
+into the first answer: 45/58 -> 42/58 fact-in-context, stable over three runs). Gating it on
+the question's inferred intent keeps 45/58 and is what ships.
+
+**Unmeasured at the point of writing:** the intent gate's effect on answers end-to-end. The
+fixture proxy is unmoved at 45/58 and the graders are corrected, but no clean generation run
+has scored it. The last full run scored the *pre-gate* build at 42/58 after regrading.
+
 ## Exploration backlog — speed
 
 The cost model, measured (0.8B Q8_0, 4 threads, this CPU):

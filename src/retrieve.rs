@@ -294,7 +294,20 @@ pub fn sections_of(html: &str) -> Vec<Section> {
 /// and the trade is re-measurable from `bench/harness.mjs select`.
 pub fn pick_sections(html: &str, q: &str, top_n: usize, per: usize) -> Picked {
     let t = terms(q);
-    let secs = sections_of(html);
+    let mut secs = sections_of(html);
+    // F73: a lead answers "what is X" and mis-answers "how do I X". F67 made the lead
+    // reachable and the product fell 40/58 to 34/58, because a lead is a definition: asked how
+    // to let a user run commands with sudo, tny explained what sudo *is*; asked what an HTTP
+    // cookie is used *for*, it defined one. Both were graded wrong and deserved it.
+    //
+    // Suppressing the lead by page *kind* was tried first and reverted: a Stack Exchange page
+    // has no h2 above its question, so its "lead" runs into the first answer and carries real
+    // content — dropping it cost three cases of fact-in-context, stable over three runs. The
+    // split that matches the evidence is the question's own intent, which `infer_intent`
+    // already recovers from the query with no label at runtime.
+    if !matches!(infer_intent(q), Intent::Other) {
+        secs.retain(|s| s.head != "(lead)");
+    }
     if secs.is_empty() {
         // Stack Exchange and DevDocs pages have no h2–h5 structure at all.
         return Picked {

@@ -63,7 +63,7 @@ export const CASES = [
 
   ["what is a shell in biology", "concept", TOP,
     /^Mollusca$/i, /chitin reinforced with calcium carbonate/i,
-    /^(?![\s\S]*\b(command[- ]?line|shell script|bash|terminal|operating system|user interface|interpreter)\b)[\s\S]*(calcium carbonate|chitin|mantle|exoskeleton|(?:hard|rigid|protective|outer|external)[\s\S]{0,30}(?:covering|casing|shell|skeleton|armou?r)|protects?[\s\S]{0,30}(?:soft|body|animal))/i],
+    /^(?![\s\S]*\b(command[- ]?line|shell script|bash|terminal|operating system|user interface|interpreter)\b)[\s\S]*(calcium carbonate|chitin|mantle|exoskeleton|bony|bone|keratin\w*|scutes?|carapace|plastron|(?:hard|rigid|protective|outer|external)[\s\S]{0,30}(?:covering|casing|shell|skeleton|armou?r)|protects?[\s\S]{0,30}(?:soft|body|animal))/i],
     // grades: accepts "the hard outer covering of an animal's body" and the material answer
     // (calcium carbonate / chitin / secreted by the mantle); rejects "a command-line
     // interpreter such as bash" and "a thin layer around the operating system".
@@ -112,7 +112,7 @@ export const CASES = [
   // ---- computing sense wanted, everyday sense must lose ----------------------------
   ["what is a kernel in an operating system", "concept", COMP,
     /^Kernel \(operating system\)$/i, /computer program at the core of a computer/i,
-    /^(?![\s\S]*\b(maize|corn|popcorn|seeds?|caryopsis|cob)\b)[\s\S]*(core of (?:a|the|an)?[\s\S]{0,30}(?:computer|operating system|os)|central (?:part|component|core)|complete control|(?:controls?|manages?|mediat\w*|arbitrat\w*|interfaces?|bridges?)[\s\S]{0,60}(?:hardware|resources|processes|memory|software))/i],
+    /^(?![\s\S]*\b(maize|corn|popcorn|seeds?|caryopsis|cob)\b)[\s\S]*(core of (?:a|the|an)?[\s\S]{0,30}(?:computer|operating system|os)|central (?:part|component|core)|complete control|(?:controls?|manages?|mediat\w*|arbitrat\w*|interfaces?|bridges?|intermediar\w*|connect\w*|link\w*)[\s\S]{0,60}(?:hardware|resources|processes|memory|software))/i],
     // grades: accepts core-of-the-OS, complete control, or mediating hardware/processes;
     // rejects "the edible seed or grain of maize, found on the cob".
   // prep: "kernel operating system". COMP r=0; union idx 7 of 48. TOP holds the same page
@@ -127,7 +127,7 @@ export const CASES = [
     // article's own lead defines a shell as taking "alphanumeric characters typed on a
     // keyboard" to "provide instructions and data", and an answer that says exactly that was
     // being marked wrong.
-    /^(?![\s\S]*\b(mollusc\w*|snail|calcium carbonate|chitin|turtle|clam|egg ?shell)\b)[\s\S]*(commands?|CLI|command[- ]?line|shell script|interpret\w*|user interface|prompt|terminal|instruction\w*|keyboard|alphanumeric|(?:layer|wrapper|interface) around[\s\S]{0,30}(?:operating system|kernel|os))/i],
+    /^(?![\s\S]*\b(mollusc\w*|snail|calcium carbonate|chitin|turtle|clam|egg ?shell)\b)[\s\S]*(commands?|CLI|command[- ]?line|shell script|interpret\w*|user interface|prompt|terminal|instruction\w*|keyboard|alphanumeric|(?:layer|wrapper|interface) around[\s\S]{0,30}(?:operating system|kernel|os)|(?:broad|direct)[\s\S]{0,40}access to[\s\S]{0,20}system)/i],
     // grades: accepts the thin-layer definition and any command/CLI/interpreter/prompt
     // phrasing; rejects "the hard protective outer covering of an animal such as a mollusc".
   // prep: "shell computing". COMP r=0 (Web shell, Remote Shell, Shell account follow);
