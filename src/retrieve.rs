@@ -518,19 +518,34 @@ pub fn search_book(kiwix: &str, query: &str, book: &str, want: usize) -> Result<
 /// No scorer can rank a candidate that was never retrieved. Nine requests at ~57 ms each,
 /// against a query whose generation step costs 21 s.
 pub fn search_union(kiwix: &str, query: &str, books: &[String], per_book: usize) -> Vec<Candidate> {
+    // F78: the requests are independent and kiwix-serve is threaded, so they overlap. Four at
+    // a time, not sixteen: kiwix-serve SIGSEGVs under heavier concurrency on a loaded machine
+    // (F72), and a laptop answering one question is not the place to saturate a server.
+    let threads = books.len().min(4).max(1);
+    let chunk = books.len().div_ceil(threads);
+    let mut parts: Vec<Vec<Vec<Candidate>>> = Vec::with_capacity(threads);
+    std::thread::scope(|s| {
+        let handles: Vec<_> = books
+            .chunks(chunk)
+            .map(|ch| s.spawn(move || ch.iter().map(|b| search_book(kiwix, query, b, per_book).unwrap_or_default()).collect::<Vec<_>>()))
+            .collect();
+        for h in handles {
+            parts.push(h.join().unwrap_or_default());
+        }
+    });
+
+    // Reassembled in book order, never completion order: F59's rank tie-break and the dedupe
+    // below both depend on a deterministic candidate order, and threads do not provide one.
     let mut out: Vec<Candidate> = Vec::new();
     let mut seen: Vec<String> = Vec::new();
-    for book in books {
-        let Ok(rows) = search_book(kiwix, query, book, per_book) else { continue };
-        for c in rows {
-            // dedupe per book: the same title in two books is two distinct answers
-            let key = format!("{}\u{0}{}", c.book, TRAIL_PAREN.replace(&c.title, ""));
-            if seen.contains(&key) {
-                continue;
-            }
-            seen.push(key);
-            out.push(c);
+    for rows in parts.into_iter().flatten().flatten() {
+        // dedupe per book: the same title in two books is two distinct answers
+        let key = format!("{}\u{0}{}", rows.book, TRAIL_PAREN.replace(&rows.title, ""));
+        if seen.contains(&key) {
+            continue;
         }
+        seen.push(key);
+        out.push(rows);
     }
     out
 }
