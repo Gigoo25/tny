@@ -13,7 +13,7 @@ mod retrieve;
 
 use ground::{command_vocab, html2txt, split_compare, ungrounded, ungrounded_detail, ungrounded_shape};
 use retrieve::{article, pick_sections, prep, rank_articles, search_union, select_terms};
-use std::io::Write;
+use std::io::{IsTerminal, Write};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
@@ -242,9 +242,161 @@ fn corpus_cmd(cfg: &Cfg, args: &[String]) -> Result<i32, String> {
 }
 
 // ------------------------------------------------------------------ the pipeline
+/// A question takes 20–60 s on a CPU, and silence for that long reads as a hang. The spinner
+/// is stderr-only and TTY-only, so pipes, the harness and `tny … > file` are untouched.
+///
+/// Streaming the answer as it generates would be better and cannot be done: F27/F44/F45 reject
+/// ungrounded answers *after* reading them, and an answer that was printed cannot be
+/// unprinted. Progress is the honest substitute — it reports the stage, never the content.
+struct Spin {
+    tx: Option<std::sync::mpsc::Sender<Option<String>>>,
+    join: Option<std::thread::JoinHandle<()>>,
+}
 
+impl Spin {
+    fn start(on: bool, first: &str) -> Spin {
+        if !on {
+            return Spin { tx: None, join: None };
+        }
+        let (tx, rx) = std::sync::mpsc::channel::<Option<String>>();
+        let mut label = first.to_string();
+        let t0 = Instant::now();
+        let join = std::thread::spawn(move || {
+            const FRAMES: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+            for i in 0.. {
+                match rx.recv_timeout(std::time::Duration::from_millis(90)) {
+                    Ok(Some(next)) => label = next,
+                    Ok(None) | Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+                    Err(_) => {}
+                }
+                eprint!("\r\x1b[2K\x1b[2m{} {label}  {:.0}s\x1b[0m", FRAMES[i % 10], t0.elapsed().as_secs_f64());
+                let _ = std::io::stderr().flush();
+            }
+            eprint!("\r\x1b[2K");
+            let _ = std::io::stderr().flush();
+        });
+        Spin { tx: Some(tx), join: Some(join) }
+    }
+
+    fn say(&self, label: impl Into<String>) {
+        if let Some(tx) = &self.tx {
+            let _ = tx.send(Some(label.into()));
+        }
+    }
+
+    fn stop(&mut self) {
+        if let Some(tx) = self.tx.take() {
+            let _ = tx.send(None);
+        }
+        if let Some(j) = self.join.take() {
+            let _ = j.join();
+        }
+    }
+}
+
+/// `wikipedia_en_top_nopic_2026-06` is a filename, not a source. Strip the language, flavour
+/// and date a ZIM name carries so the line under an answer reads like a citation.
+fn human_book(name: &str) -> String {
+    let stem = name.split("_en_").next().unwrap_or(name);
+    match stem {
+        "wikipedia" => "Wikipedia".into(),
+        "archlinux" => "Arch Wiki".into(),
+        s if s.starts_with("devdocs") => {
+            let topic = name.split("_en_").nth(1).unwrap_or("").split('_').next().unwrap_or("");
+            format!("devdocs {topic}").trim().to_string()
+        }
+        s => s.trim_end_matches(".com").to_string(),
+    }
+}
+
+/// An article the answer was built from, kept so the prompt can open it.
+struct Source {
+    book: String,
+    path: String,
+    title: String,
+}
+
+enum Next {
+    Ask(String, bool),
+    Open(usize),
+    Quit,
+}
+
+/// F75: a terminal answerer that exits after one answer makes the user retype `tny` and pay
+/// the library and model start-up again for a question they already had in mind. The prompt
+/// keeps the process — and both servers — warm, and costs nothing when stdin is not a
+/// terminal, so pipes and the benchmark harness behave exactly as before.
 fn run(cfg: &Cfg, question: &str, follow: bool) -> Result<i32, String> {
+    let mut q = question.to_string();
+    let mut follow = follow;
+    loop {
+        let (code, sources) = answer_once(cfg, &q, follow)?;
+        let interactive = std::io::stdin().is_terminal()
+            && std::io::stderr().is_terminal()
+            && !cfg.rank_only
+            && !cfg.dump
+            && !cfg.context;
+        if !interactive || sources.is_empty() {
+            return Ok(code);
+        }
+        loop {
+            match prompt(&sources)? {
+                Next::Quit => return Ok(code),
+                Next::Open(i) => open_source(cfg, &sources, i),
+                Next::Ask(text, f) => {
+                    q = text;
+                    follow = f;
+                    break;
+                }
+            }
+        }
+    }
+}
+
+fn prompt(sources: &[Source]) -> Result<Next, String> {
+    let extra = if sources.len() > 1 { format!(" (o2–o{})", sources.len()) } else { String::new() };
+    eprint!("\x1b[2m  ▸ follow-up · n new topic · o open source{extra} · q quit\x1b[0m\n> ");
+    std::io::stderr().flush().ok();
+    let mut line = String::new();
+    // EOF (Ctrl-D) is a quit, not an error.
+    if std::io::stdin().read_line(&mut line).map_err(|e| e.to_string())? == 0 {
+        eprintln!();
+        return Ok(Next::Quit);
+    }
+    let line = line.trim();
+    Ok(match line {
+        "" => Next::Open(usize::MAX), // no-op: re-prompt rather than punish a stray Enter
+        "q" | "quit" | "exit" => Next::Quit,
+        "o" | "o1" => Next::Open(0),
+        s if s.len() == 2 && s.starts_with('o') && s[1..].parse::<usize>().is_ok() => {
+            Next::Open(s[1..].parse::<usize>().unwrap_or(1) - 1)
+        }
+        // A follow-up carries the previous turn (F29); `n` drops it, for when the subject
+        // changes and the old question would only poison the retrieval query.
+        s if s == "n" => Next::Ask(String::new(), false),
+        s if let Some(rest) = s.strip_prefix("n ") => Next::Ask(rest.to_string(), false),
+        s => Next::Ask(s.to_string(), true),
+    })
+}
+
+/// The corpora are already served over HTTP by kiwix-serve, so "open the source" is a URL the
+/// browser can read — offline, from the same ZIM the answer came from.
+fn open_source(cfg: &Cfg, sources: &[Source], i: usize) {
+    let Some(s) = sources.get(i) else { return };
+    let url = format!("{}/content/{}/{}", cfg.kiwix, s.book, s.path);
+    let opener = if cfg!(target_os = "macos") { "open" } else { "xdg-open" };
+    match Command::new(opener).arg(&url).stdout(Stdio::null()).stderr(Stdio::null()).spawn() {
+        Ok(_) => eprintln!("\x1b[2m  opening {}\x1b[0m", s.title),
+        Err(_) => eprintln!("  {url}"),
+    }
+}
+
+/// One question, one answer. Returns the exit code and the articles the answer was built
+/// from, so the prompt underneath can offer to open them.
+fn answer_once(cfg: &Cfg, question: &str, follow: bool) -> Result<(i32, Vec<Source>), String> {
     let t_all = Instant::now();
+    let quiet = cfg.rank_only || cfg.dump || cfg.context;
+    let mut spin = Spin::start(std::io::stderr().is_terminal() && !quiet, "starting the library");
     serve_kiwix(cfg)?;
 
     let prev = if follow { last_turn(cfg) } else { None };
@@ -270,7 +422,7 @@ fn run(cfg: &Cfg, question: &str, follow: bool) -> Result<i32, String> {
         if let (Some(x), Some(y)) = (ha.as_ref(), hb.as_ref()) {
             if x.title != y.title {
                 eprintln!("tny: that compares two topics — ask about one:\n  · {}\n  · {}", x.title, y.title);
-                return Ok(2);
+                return Ok((2, vec![]));
             }
         }
     }
@@ -290,6 +442,7 @@ fn run(cfg: &Cfg, question: &str, follow: bool) -> Result<i32, String> {
     // (23/58 against 32/58) was blamed on biased statistics. The statistics were fine.
     let prepped = prep(&retrieval_q);
     let mut query = select_terms(&prepped, search_terms());
+    spin.say(format!("searching {} corpora", books.len()));
     let mut cands = search_union(&cfg.kiwix, &query, &books, PER_BOOK);
     // F72: an empty shortlist means one of two very different things, and tny reported the
     // wrong one. kiwix-serve dies under sustained load on a small machine — measured here
@@ -320,7 +473,8 @@ fn run(cfg: &Cfg, question: &str, follow: bool) -> Result<i32, String> {
     }
     let t_search = t.elapsed();
     if cands.is_empty() {
-        return Ok(no_local_match(cfg, &query));
+        spin.stop();
+        return Ok((no_local_match(cfg, &query), vec![]));
     }
     let ranked = rank_articles(&retrieval_q, &cands);
     // Retrieval is 2 % of a query's wall time, so measuring ranking through full generation
@@ -331,7 +485,7 @@ fn run(cfg: &Cfg, question: &str, follow: bool) -> Result<i32, String> {
         for c in ranked.iter().take(8) {
             println!("{}\t{}\t{}", c.book, c.title, c.path);
         }
-        return Ok(0);
+        return Ok((0, vec![]));
     }
     if cfg.dump {
         // Every candidate, unranked, as JSON: lets a scorer be tried offline in
@@ -346,14 +500,15 @@ fn run(cfg: &Cfg, question: &str, follow: bool) -> Result<i32, String> {
             })
             .collect();
         println!("{}", serde_json::to_string(&rows).unwrap_or_default());
-        return Ok(0);
+        return Ok((0, vec![]));
     }
     // Only now is the model needed: everything above is retrieval. `--context` stops before
     // the load, so inspecting what the model was given costs a search and a fetch.
     if !cfg.context {
+        spin.say("loading the model");
         serve_chat(cfg)?;
     }
-    let best = &ranked[0];
+
 
     // F58: three articles, not one. Rank-1 carries the answer for 36 of 58 verified cases,
     // but the top *three* carry it for 45 — retrieval's misses are near-misses, and a
@@ -361,6 +516,7 @@ fn run(cfg: &Cfg, question: &str, follow: bool) -> Result<i32, String> {
     // than by a better scorer (F53 closed content reranking; F56 exhausted lexical signals).
     // F39b measured the same shape at the section level: 3 articles x 1 section beat
     // 1 article x 3 sections, 5/6 vs 4/6.
+    spin.say(format!("reading {}", ranked[0].title));
     let t = Instant::now();
     let mut docs: Vec<(&retrieve::Candidate, String)> = Vec::new();
     for c in ranked.iter().take(TOP_ARTICLES) {
@@ -390,7 +546,7 @@ fn run(cfg: &Cfg, question: &str, follow: bool) -> Result<i32, String> {
     let picked = retrieve::Picked { heads, text: parts.join("\n\n") };
     if cfg.context {
         println!("{}", picked.text);
-        return Ok(0);
+        return Ok((0, vec![]));
     }
 
     // F32: grounding reads the whole article, not the slice sent to the model — the slice
@@ -400,6 +556,7 @@ fn run(cfg: &Cfg, question: &str, follow: bool) -> Result<i32, String> {
     let full = docs.iter().map(|(_, h)| html2txt(h)).collect::<Vec<_>>().join("\n");
     let vocab = docs.iter().flat_map(|(_, h)| command_vocab(h)).collect::<Vec<_>>();
 
+    spin.say("answering");
     let t = Instant::now();
     let answer = ask(cfg, question, &picked.text, prev.as_ref())?;
     let t_gen = t.elapsed();
@@ -416,21 +573,27 @@ fn run(cfg: &Cfg, question: &str, follow: bool) -> Result<i32, String> {
     .find(|r| !r.is_empty())
     .unwrap_or_default();
 
+    // The sources the answer was actually built from — the caller offers to open them, and
+    // the model saw all three, so citing only rank 1 would credit the wrong article.
+    let sources: Vec<Source> = docs
+        .iter()
+        .map(|(c, _)| Source {
+            book: c.book.clone(),
+            path: c.path.clone(),
+            title: c.title.clone(),
+        })
+        .collect();
+
+    spin.stop();
     if cfg.verbose {
         eprintln!(
-            "  search {} ms · fetch {} ms · generate {} ms",
+            "  search {} ms · fetch {} ms · generate {} ms · §{}",
             t_search.as_millis(),
             t_fetch.as_millis(),
-            t_gen.as_millis()
+            t_gen.as_millis(),
+            picked.heads.join(", §")
         );
     }
-    eprintln!(
-        "{} · {} · §{} ({:.1}s)",
-        best.book,
-        best.title,
-        picked.heads.join(", §"),
-        t_all.elapsed().as_secs_f64()
-    );
     if let Some(note) = corpus::stale_note(&cfg.cache) {
         eprint!("{note}");
     }
@@ -441,11 +604,21 @@ fn run(cfg: &Cfg, question: &str, follow: bool) -> Result<i32, String> {
         // one moment a download suggestion is certainly not noise.
         suggest_corpus(cfg, &query);
         println!("not found");
-        return Ok(3);
+        return Ok((3, sources));
     }
     println!("{}", answer.trim());
+    // F75: the source line was `wikipedia_en_top_nopic_2026-06 · Sky Blue Sky · §Release and
+    // reception, §Composition, §Sky and sea, §Artificial blues, …` — a filename, a rank-1
+    // article that was not where the answer came from, and six section names that mean
+    // something only to whoever wrote the ranker. What a reader needs is which works were
+    // consulted; sections are diagnostics and moved behind `-v`.
+    let cite: Vec<String> = sources
+        .iter()
+        .map(|s| format!("{} · {}", human_book(&s.book), s.title))
+        .collect();
+    eprintln!("\n\x1b[2m  {}   {:.1}s\x1b[0m", cite.join("\n  "), t_all.elapsed().as_secs_f64());
     save_turn(cfg, question, &answer);
-    Ok(0)
+    Ok((0, sources))
 }
 
 /// F40/F57: the catalog is the index — 1,286 English ZIMs, cached locally at 1.5 MB, so a
