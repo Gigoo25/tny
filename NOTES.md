@@ -1765,6 +1765,43 @@ A benchmark is code, and an unmeasured benchmark is worth as little as unmeasure
 every number in this session's earlier answer runs was wrong for a reason that had nothing to
 do with the system under test.
 
+## F65 — authored ground truth, and what it says the remaining failures are
+
+`bench/expect.mjs` now carries one authored regex per case for all 58, written against the
+source article's fact rather than its prose: accept any paraphrase, reject the plausible wrong
+answer. **40/58 (69%)** — `inst 12/18`, `qa 6/14`, `gen 12/16`, `amb 10/10`.
+
+The number barely moved from the needle-graded 40/58, but the composition did: `inst` fell
+15 -> 12 and `qa`/`gen` rose. The needles were wrong in *both* directions at once, which is
+why the totals agreed by accident.
+
+I audited all 58 verdicts by hand against the cached answers, and the audit found two grader
+defects that no total would have exposed:
+
+- `process[\s\S]{0,40}(holding|open)` scored **"check inode count with `tune2fs -l` to identify
+  if the deletion caused a process to open the file"** as correct. Backwards causality, wrong
+  tool, and it matched on the word `open` alone.
+- the systemd pattern matched **the question restated** ("enable a systemd service so it
+  starts at boot"), not the answer. Right verdict, no evidence behind it.
+
+A grader is code. Auditing its output one case at a time is the only test it has.
+
+## F66 — the rank-1 miss is not an answer miss
+
+The four synonym-gap cases (`Rayleigh scattering` for "why is the sky blue", `Mollusca` for
+"shell in biology", `Biscuit` for "cookie", `Sodium chloride` for "table salt") are the ones I
+measured and failed to fix three ways in F59 — snippet weight, per-book `totalResults`, kiwix
+bold markers. They are **all four answered correctly end-to-end**, and `bench/rank-cli.mjs`
+still reports three of them `ABSENT`.
+
+Sending three articles (F58) closed a gap that no ranking change could. So the retrieval
+metric understates the product by construction: it grades the article at rank 1 against the
+article's own prose, and the model reads a 3-article context graded on the answer.
+
+Consequence for where to spend next: retrieval is at `article@1 37/58`, `shortlist 48/58`,
+`book@1 47/58`, and the product is at 40/58. The gap between shortlist and product is the
+model's extraction, not the search. Chasing rank-1 further buys nothing measurable.
+
 ## Exploration backlog — speed
 
 The cost model, measured (0.8B Q8_0, 4 threads, this CPU):
