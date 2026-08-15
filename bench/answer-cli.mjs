@@ -28,6 +28,10 @@ async function answerOf(query) {
   const err = await new Response(p.stderr).text();
   await p.exited;
   cache[query] = { ans, err };
+  // F106: write through, not at the end. A 4B answer costs 4-5 minutes here, and a run
+  // killed at case 13 of 18 used to leave nothing on disk — an hour of measurement thrown
+  // away by a timeout. Rewriting the whole file per case costs milliseconds against minutes.
+  await Bun.write(CACHE, JSON.stringify(cache, null, 1));
   return cache[query];
 }
 
@@ -44,6 +48,5 @@ for (const [set, query, , , , needleRe, expectRe] of CASES) {
   console.log(`${verdict.padEnd(8)} ${((Date.now() - t) / 1000).toFixed(0).padStart(3)}s ${set} ${query.slice(0, 46).padEnd(48)} ${ans.replace(/\s+/g, " ").slice(0, 70)}`);
 }
 
-if (!regrade) await Bun.write(CACHE, JSON.stringify(cache, null, 1));
 
 tally.report("model   ");

@@ -328,32 +328,41 @@ fn main() {
 }
 
 fn usage() {
-    eprintln!(
-        "tny \"question\"               grounded answer from local ZIM corpora\n\
-         \n\
-             --ultrafast            best passage from the page, no model    ~1 s\n\
-             --fast                 one article                            ~15 s\n\
-             --slow                 three articles, read twice as deep     ~60 s\n\
-             --molasses             three articles, read as deep as it gets\n\
-                                    default is medium; `+` reads deeper\n\
-         \n\
-             --low                  one-sentence answers\n\
-             --max                  full answers, up to three paragraphs\n\
-             --model <m>            0.8b (default) · 2b · 4b · any hf repo:quant\n\
-                                    both dials stick: what you pick is what you get next time\n\
-         \n\
-           -f, --follow               treat this as a follow-up to the last question\n\
-               --fresh                re-answer instead of reusing the cached answer\n\
-           -v, --verbose              per-stage timings on stderr\n\
-         \n\
-         tny --corpus list            mounted ZIM files\n\
-         tny --corpus search <text>   find ZIMs in the kiwix library\n\
-         tny --corpus pack [name]     download a whole shelf: mini small medium large huge\n\
-         tny --corpus add <name>      download a ZIM (resumable, byte-verified)\n\
-         tny --corpus update          check the library for newer editions\n\
-         \n\
-         needs llama-server and kiwix-serve on PATH\n\
-         env: TNY_ZIM, TNY_MODELS, TNY_CHAT, TNY_KIWIX, TNY_MODE"
+    // A raw string, because `\n\` continuations swallow the leading whitespace of the next
+    // line and every attempt to indent a sub-line inside one silently comes out flush left.
+    eprint!(
+        r#"tny "question"          an answer from the ZIM corpora on this disk
+tny                     the same, interactive
+
+speed        --ultrafast   the best passage from the page, no model      0.3 s
+             --fast        one article                                    14 s
+             --medium      three articles (default)                       39 s
+             --slow        three articles, read twice as deep             50 s
+             --molasses    three articles, as deep as it gets             90 s
+
+length       --low         one sentence
+             --max         up to three paragraphs
+
+model        --model 0.8b  also 2b, 4b, or any huggingface repo:quant
+
+             what you pick in the interface is what you get next time
+
+  -f, --follow    treat this as a follow-up to the last question
+      --fresh     re-answer instead of reusing the cached answer
+  -v, --verbose   per-stage timings on stderr
+
+corpus       tny --corpus list             mounted ZIM files
+             tny --corpus search <text>    find ZIMs in the kiwix library
+             tny --corpus pack [name]      a whole shelf: mini small medium large huge
+             tny --corpus add <name>       one ZIM (resumable, byte-verified)
+             tny --corpus update           check for newer editions
+
+keys         i ask · 1-9 pick a source · ⏎ read it · j k scroll · r again
+             + - speed · < > length · :model 4b · q quit
+
+needs llama-server and kiwix-serve on PATH
+env: TNY_ZIM, TNY_MODELS, TNY_CHAT, TNY_KIWIX, TNY_MODE, TNY_LEN, TNY_MODEL
+"#
     );
 }
 
