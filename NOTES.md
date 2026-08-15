@@ -2033,6 +2033,45 @@ The honest framing: a 0.8B model that spends 20 s reading in order to rewrite on
 was handed is doing a 100 ms job. The question is not whether something smaller works, but how
 many of the 58 cases the big one is actually winning.
 
+### The control ran, and the model is doing real work
+
+`bench/extract-cli.mjs`, no model anywhere: take the exact context `tny --context` hands the
+model, pick text out of it, grade with the same grader on the same 58 cases
+(`bench/grade.mjs`, extracted so both arms cannot drift apart — the model's number was
+re-verified at 42/58 across the refactor).
+
+```
+arm                                    correct   of the 46 the context contains
+model, 0.8B Q8_0, 20-40 s               42/58    91 %
+leadbest  lead sentence + best match    21/58    46 %
+lead      first real sentence           18/58    31 %
+window    best sentence + the next      10/58    22 %
+overlap   most query terms, len-norm     9/58    20 %
+idf       rarity-weighted overlap        9/58    20 %
+section   the whole best section         7/58    15 %
+```
+
+**The model buys 21 cases.** Selection costs microseconds against 20–40 s, and it still loses
+more than half of the facts that are sitting in its input. Every cheaper idea below is now
+arguing about that 21, not about whether generation is needed at all.
+
+Two things the sweep says that I did not expect:
+
+- **Query-term selection is worse than taking the first sentence** (9 vs 18). The densest
+  sentence is a list, a cross-reference, or a `See also` line — query words cluster in prose
+  *about* the topic, while the answer sentence often states the fact without repeating the
+  question. F67's lead fix found the same thing structurally.
+- **Handing over the whole section scores lowest of all** (7/58). The graders are authored to
+  reject the plausible wrong answer, so a wall of text trips a rejection clause somewhere. A
+  verbose extractor is not a safer extractor — it is a worse one, and that is the grader
+  working as designed.
+
+What this rules out: shipping extraction alone. What it leaves open, in order of cost — an
+*embedding* scorer rather than lexical (bge-small is already running for F31, and the failure
+mode above is exactly lexical: the answer sentence does not repeat the question's words); a
+SQuAD-tuned extractive QA head; and a smaller generator. All three are now measurable against
+one number: 21/58 to beat, 42/58 to match.
+
 ### Speed levers that are independent of the model
 
 - **Parallelise the per-book search.** 16 books are queried in series and it measures 2.2–3.2 s.
