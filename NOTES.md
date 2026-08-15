@@ -2349,6 +2349,124 @@ One turn should still be enough — steering is the safety net, not the excuse �
 measurement that decides corpus changes from here is *was the right page in the shortlist*,
 not *did the sentence match a regex written in an earlier session*.
 
+## F93 — a flag question is answered by the flag's own entry, and nothing else on the page
+
+`what does the --oneline flag do in git log` was answered "it disables tab expansion". The
+context did not contain the answer: `--oneline` occurs three times in git-log(1) and the
+window landed on one of the two cross-references, because the window centres on query-term
+density and a cross-reference is where the term is densest in someone else's sentence.
+
+```
+"…either explicit or implied by other options such as --oneline."     <- cross-ref, picked
+"--oneline  This is a shorthand for --pretty=oneline --abbrev-commit"  <- the answer
+"…when there is no --pretty, --format, or --oneline option given"      <- cross-ref
+```
+
+The definition is the occurrence followed by prose; a cross-reference is followed by
+punctuation or a lowercase continuation. `flag_anchor` scores the occurrences that way and
+centres the window on the winner. Same 3,249-char context, answer now present.
+
+## F100 — a wider window around an anchored flag is a *worse* window
+
+Growing the context to reach the definition also worked, and cost 3.3× the prefill:
+
+| per-section | context | definition present |
+|---|---|---|
+| 600 | 3,249 chars | no (before F93) |
+| 1200 | 6,251 chars | no |
+| 2000 | 10,251 chars | yes, ~2,500 tokens, ~74 s |
+
+But measured end-to-end it was worse than the cheap fix, and worse than doing nothing:
+
+| mode | answer |
+|---|---|
+| fast, medium | shorthand for `--pretty=oneline --abbrev-commit` ✓ |
+| slow, molasses | "`--oneline` **negates** `--abbrev-commit`" ✗ |
+
+A man page lists flags adjacently, so a wider window adds *neighbouring entries*, never more
+of the answer: at 1200+ chars `--no-abbrev-commit` came into view and the model reported the
+neighbour's meaning under the asked flag's name. Anchored windows are now clamped to 600
+chars whatever the mode asked for, and all four tiers answer correctly.
+
+**More context is not more accuracy.** It is more surface for the wrong sentence to be on.
+
+## F94 — speed as a dial, because every machine this runs on is slow in a different way
+
+Context size is the only lever with real range (prefill is 85-90 % of an answer, F80), so it
+is the dial. Measured here, warm servers, no shell overhead:
+
+| mode | articles × sections × chars | tokens | wall |
+|---|---|---|---|
+| ultrafast | 1 × 2 × 600, no model | — | **0.25 s** |
+| fast | 1 × 2 × 600 | ~310 | 13.7 s |
+| medium | 3 × 5 × 600 | ~913 | 38.7 s |
+| slow | 3 × 5 × 1200 | ~1,800 | 41-66 s |
+| molasses | 3 × 6 × 2000 | ~2,900 | 90 s |
+
+The cache is keyed by mode. Without that, `--slow` after `--medium` hands back the medium
+answer and the flag silently does nothing — the bug is not that the answer is stale, it is
+that the setting appears broken.
+
+## F95 — the tier with no model at all
+
+`ultrafast` answers from the page: lead sentence plus the best-scoring one (the `leadbest`
+arm, F79's 21/58 against the model's 42/58). It is worse, it is 150× faster, and it cannot
+fabricate, because every word is the source's own. For a search engine that is a fair first
+look with the model one keypress away. Flag questions reuse `flag_anchor` to pick the
+sentence, rather than letting term density pick a cross-reference again.
+
+## F102/F103 — length is a second dial, and both of them stick
+
+How long you will wait and how much you want written are different questions: one sentence
+is right for "what does `-p` do" and useless for "how do I set up a swap file". `low` /
+`medium` / `max` set the system-prompt clause and `max_tokens` (80/160/512), and are in the
+cache key for the same reason the mode is.
+
+Both dials, and the model, persist to `~/.cache/tny/prefs` when changed in the TUI. A
+setting that resets tomorrow is decoration; the right speed is a property of the machine,
+not of one question. Flags still win for a single invocation.
+
+## F101/F104 — the model is its own dial, and 4B does not fit this machine
+
+Binding the model to the speed tier meant a 4B could only ever be tried with the deepest
+context — the slowest possible way to find out whether it is worth anything. It is now
+`--model 0.8b|2b|4b|<any hf repo:quant>`, and llama-server is restarted when the running
+model is not the requested one.
+
+Qwen3.5-4B-Q4_K_M, 2.54 GiB, measured on this 4-core CPU:
+
+```
+           prefill        decode
+0.8B Q8_0  34-40 t/s      6-8 t/s
+4B Q4_K_M   4.44 t/s      1.45 t/s     <- 7.7× and 4.6× slower
+```
+
+At the default 913-token context that is 205 s of prefill before a token is emitted, and
+~4.5 min per answer. It answers well (`what is a swap file` at fast/low: correct, cites
+`mkswap(8)`, `swapon`, `/etc/fstab`, 100 s) — the question is whether it is *better enough*,
+which is what the 18-case instructional run measures.
+
+## F96/F97/F98/F99 — the TUI
+
+The line prompt had three problems escape codes cannot fix: a 20-90 s answer froze the
+screen with no way to change your mind, steering competed with typing for the digit keys,
+and each answer scrolled the last one away. `ratatui`, one worker thread, a 100 ms redraw
+clock — `q` still quits while the model is 40 s into an answer.
+
+- **F97 — a follow-up keeps what it follows.** Turns accumulate in one scrolling transcript,
+  each under its question. Erasing the answer you are asking about hides the thing the
+  pronoun refers to. Verified: "what is a swap file" then "how do I create one" both on
+  screen, the second appended below.
+- **F98 — modal, like vim.** `i` types, `Esc` drives. That is what frees the digits: `1`-`9`
+  pick a source, `⏎` reads it, `j`/`k`/`^D`/`^U`/`gg`/`G` scroll, `+`/`-` speed, `<`/`>`
+  length, `:model 4b`, `:q`. One state flag parses `gg`; there is no other multi-key command.
+- **F99 — the shortlist is cached with the answer.** A cache hit used to return only the
+  cited sources, so the second time you asked something — exactly when you know the answer
+  was bad — there was nothing left to steer to. Old entries fall back to their sources.
+
+A terminal gets the TUI; a pipe gets a line of text. `--context`, `--rank`, `--dump` and
+every benchmark redirect stdout, so they behave exactly as before.
+
 ## Exploration backlog — speed
 
 The cost model, measured (0.8B Q8_0, 4 threads, this CPU):

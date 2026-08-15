@@ -10,6 +10,7 @@
 mod corpus;
 mod ground;
 mod retrieve;
+mod tui;
 
 use ground::{command_vocab, html2txt, split_compare, ungrounded, ungrounded_detail, ungrounded_shape};
 use retrieve::{article, pick_sections, prep, rank_articles, search_union, select_terms};
@@ -23,27 +24,100 @@ use std::time::{Duration, Instant};
 // model-alone refusal on a mismatched context from 4/6 to 6/6 while cutting output from 31
 // to 29 tokens. Command-only variants ("reply with that command and nothing else") lost a
 // correct answer, 5/6.
-const SYS: &str = "Answer the question using the reference material. Be concise: at most two sentences plus the exact command if one applies. Use only facts written in the reference. Never add a flag, option, version, or path that does not appear there.";
+/// The two rules that survive every measurement: answer from the reference, and never invent
+/// a flag. How *long* the answer runs is the user's business — `Len` supplies that clause.
+const SYS: &str = "Answer the question using the reference material. Use only facts written in the reference. Never add a flag, option, version, or path that does not appear there.";
+
+/// F102: how much answer you want, separate from how long you will wait for it. A one-line
+/// answer to "what does -p do" is right and a paragraph is padding; a one-line answer to "how
+/// do I set up a swap file" is useless. The model cannot judge which it is looking at, so the
+/// dial is the user's.
+#[derive(Clone, Copy, PartialEq)]
+enum Len {
+    Low,
+    Medium,
+    Max,
+}
+
+impl Len {
+    fn clause(self) -> &'static str {
+        match self {
+            Len::Low => " Answer in one sentence, plus the exact command if one applies.",
+            Len::Medium => " Be concise: at most three sentences, plus the exact command if one applies.",
+            // Still bounded: unbounded generation on a 0.8B rambles, and every token costs a
+            // second of wall clock on the machines this runs on.
+            Len::Max => " Answer fully, in at most three short paragraphs. Include the exact commands that apply.",
+        }
+    }
+    fn tokens(self) -> u32 {
+        match self {
+            Len::Low => 80,
+            Len::Medium => 160,
+            Len::Max => 512,
+        }
+    }
+    fn name(self) -> &'static str {
+        match self {
+            Len::Low => "low",
+            Len::Medium => "medium",
+            Len::Max => "max",
+        }
+    }
+    fn parse(s: &str) -> Option<Len> {
+        match s {
+            "low" | "short" => Some(Len::Low),
+            "medium" => Some(Len::Medium),
+            "max" | "long" => Some(Len::Max),
+            _ => None,
+        }
+    }
+    fn next(self) -> Option<Len> {
+        match self {
+            Len::Low => Some(Len::Medium),
+            Len::Medium => Some(Len::Max),
+            Len::Max => None,
+        }
+    }
+    fn prev(self) -> Option<Len> {
+        match self {
+            Len::Low => None,
+            Len::Medium => Some(Len::Low),
+            Len::Max => Some(Len::Medium),
+        }
+    }
+}
 
 const CHAT_PORT: u16 = 8080;
 const KIWIX_PORT: u16 = 8082;
 // F26/F43/F46: 0.8B is the floor. 350M degenerates, 230M refuses nothing unaided, 2B costs
 // 2.2× for the same 6/6, and Q4_K_M halves RAM but breaks the grounding check's recovery.
-const MODEL: &str = "ggml-org/Qwen3.5-0.8B-GGUF:Q8_0";
-const MODEL_DIR: &str = "models--ggml-org--Qwen3.5-0.8B-GGUF";
+/// F101: the model is its own dial, not a consequence of the speed one. They are independent
+/// questions — how much text to read, and who reads it — and binding them meant a 4B could
+/// only ever be tried with the deepest context, which is the slowest possible way to find out
+/// whether it is worth anything (F104: 4.44 tok/s prefill makes that an 11-minute answer).
+///
+/// Named models are the ones measured here; anything else is passed to llama-server as `-hf`
+/// verbatim, so trying a new one costs a flag rather than a rebuild.
+const MODELS: [(&str, &str, &str); 3] = [
+    // key      repo:quant                              size
+    ("0.8b", "ggml-org/Qwen3.5-0.8B-GGUF:Q8_0", "~800 MB"),
+    ("2b", "ggml-org/Qwen3.5-2B-GGUF:Q4_K_M", "~1.2 GB"),
+    ("4b", "unsloth/Qwen3.5-4B-GGUF:Q4_K_M", "~2.5 GB"),
+];
+const MODEL: &str = MODELS[0].1;
 // F31: lexical section selection needs top-5 × 600 chars for 14/14. F80: also the prompt
 // size, and prefill is 19–22 s of a 20–40 s answer — so these are latency constants as much
 // as accuracy ones. Overridable so a sweep costs a run rather than a rebuild.
-fn top_sections() -> usize {
-    std::env::var("TNY_TOP_SECTIONS").ok().and_then(|v| v.parse().ok()).unwrap_or(5)
+fn top_sections(cfg: &Cfg) -> usize {
+    std::env::var("TNY_TOP_SECTIONS").ok().and_then(|v| v.parse().ok()).unwrap_or(cfg.mode.dims().1)
 }
-fn per_section() -> usize {
-    std::env::var("TNY_PER_SECTION").ok().and_then(|v| v.parse().ok()).unwrap_or(600)
+fn per_section(cfg: &Cfg) -> usize {
+    std::env::var("TNY_PER_SECTION").ok().and_then(|v| v.parse().ok()).unwrap_or(cfg.mode.dims().2)
 }
 // F58: the answer is in the top-1 article for 36/58 cases and in the top-3 for 45/58.
 // F82: overridable, to measure what a cheap first pass over one article would reach.
-fn top_articles() -> usize {
-    std::env::var("TNY_TOP_ARTICLES").ok().and_then(|v| v.parse().ok()).unwrap_or(3)
+fn top_articles(cfg: &Cfg) -> usize {
+    std::env::var("TNY_TOP_ARTICLES").ok().and_then(|v| v.parse().ok()).unwrap_or(cfg.mode.dims().0)
 }
 // F63: hits per book. Deeper costs nothing — one request per book either way, just a longer
 // response — and it lifts the recall ceiling from 54/58 to 55/58 (`Hippocampus` answers
@@ -69,6 +143,83 @@ const NEED_KIWIX: &str = "kiwix-serve not on PATH. Install kiwix-tools:\n  \
     nix:    nix-shell -p kiwix-tools\n  \
     other:  download.kiwix.org/release/kiwix-tools";
 
+/// F94: this laptop is slow and every laptop running a 0.8B on CPU will be, so the honest
+/// knob is not "make it fast" but "how long are you willing to wait for this question".
+/// Context size is the only dial that matters — prefill is 85-90 % of an answer (F80) — and
+/// it buys real accuracy: `--oneline`'s definition is 10 KB into git-log(1), and F82 measured
+/// one article carrying the answer for 40 of 58 cases against three articles' 46.
+#[derive(Clone, Copy, PartialEq)]
+enum Mode {
+    /// No model at all: retrieval plus the best passage, verbatim (F95).
+    Ultrafast,
+    Fast,
+    Medium,
+    Slow,
+    Molasses,
+}
+
+impl Cfg {
+    /// True when a TUI is drawing: answers are returned, not printed.
+    fn hosted(&self) -> bool {
+        self.progress.is_some()
+    }
+}
+
+impl Mode {
+    /// (articles, sections, chars per section)
+    fn dims(self) -> (usize, usize, usize) {
+        match self {
+            Mode::Ultrafast => (1, 2, 600),
+            Mode::Fast => (1, 2, 600),
+            Mode::Medium => (3, 5, 600),
+            Mode::Slow => (3, 5, 1200),
+            Mode::Molasses => (3, 6, 2000),
+        }
+    }
+    /// What the model is for: everything except the first tier.
+    fn generates(self) -> bool {
+        self != Mode::Ultrafast
+    }
+    fn prev(self) -> Option<Mode> {
+        match self {
+            Mode::Ultrafast => None,
+            Mode::Fast => Some(Mode::Ultrafast),
+            Mode::Medium => Some(Mode::Fast),
+            Mode::Slow => Some(Mode::Medium),
+            Mode::Molasses => Some(Mode::Slow),
+        }
+    }
+    fn next(self) -> Option<Mode> {
+        match self {
+            Mode::Ultrafast => Some(Mode::Fast),
+            Mode::Fast => Some(Mode::Medium),
+            Mode::Medium => Some(Mode::Slow),
+            Mode::Slow => Some(Mode::Molasses),
+            Mode::Molasses => None,
+        }
+    }
+    fn name(self) -> &'static str {
+        match self {
+            Mode::Ultrafast => "ultrafast",
+            Mode::Fast => "fast",
+            Mode::Medium => "medium",
+            Mode::Slow => "slow",
+            Mode::Molasses => "molasses",
+        }
+    }
+    fn parse(s: &str) -> Option<Mode> {
+        match s {
+            "ultrafast" => Some(Mode::Ultrafast),
+            "fast" => Some(Mode::Fast),
+            "medium" => Some(Mode::Medium),
+            "slow" => Some(Mode::Slow),
+            "molasses" => Some(Mode::Molasses),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Clone)]
 struct Cfg {
     chat: String,
     kiwix: String,
@@ -86,6 +237,12 @@ struct Cfg {
     context: bool,
     /// Skip the answer cache for this question and replace what is in it.
     fresh: bool,
+    mode: Mode,
+    len: Len,
+    /// `repo:quant` for llama-server's `-hf`.
+    model: String,
+    /// Where stage labels go when a TUI owns the screen. `None` is the plain CLI: print.
+    progress: Option<std::sync::Arc<std::sync::Mutex<String>>>,
 }
 
 fn main() {
@@ -95,6 +252,9 @@ fn main() {
     let mut dump = false;
     let mut context = false;
     let mut fresh = false;
+    let mut mode: Option<Mode> = None;
+    let mut len: Option<Len> = None;
+    let mut model: Option<String> = None;
     let mut follow = false;
     let mut corpus_args: Option<Vec<String>> = None;
     let mut args = std::env::args().skip(1);
@@ -105,6 +265,14 @@ fn main() {
             "--dump" => dump = true,
             "--context" => context = true,
             "--fresh" => fresh = true,
+            "--ultrafast" => mode = Some(Mode::Ultrafast),
+            "--fast" => mode = Some(Mode::Fast),
+            "--medium" => mode = Some(Mode::Medium),
+            "--slow" => mode = Some(Mode::Slow),
+            "--molasses" => mode = Some(Mode::Molasses),
+            "--model" => model = args.next(),
+            "--low" | "--short" => len = Some(Len::Low),
+            "--max" | "--long" => len = Some(Len::Max),
             "-f" | "--follow" => follow = true,
             "--corpus" => corpus_args = Some(args.by_ref().collect()),
             "-h" | "--help" => {
@@ -124,7 +292,7 @@ fn main() {
         }
     }
 
-    let cfg = match config(verbose, rank_only, dump, context, fresh) {
+    let cfg = match config(verbose, rank_only, dump, context, fresh, mode, len, model) {
         Ok(c) => c,
         Err(e) => {
             eprintln!("tny: {e}");
@@ -132,8 +300,18 @@ fn main() {
         }
     };
 
+    // F96: a terminal gets the TUI, a pipe gets a line of text. The benchmark harness, the
+    // `--context`/`--rank`/`--dump` diagnostics and `tny q > file` all redirect stdout, so
+    // they keep the exact behaviour they had — and an interactive user never gets a screen
+    // full of escape codes in their pager.
+    let tui = std::io::stdout().is_terminal()
+        && std::io::stdin().is_terminal()
+        && !cfg.rank_only
+        && !cfg.dump
+        && !cfg.context;
     let r = match corpus_args {
         Some(sub) => corpus_cmd(&cfg, &sub),
+        None if tui => tui::run(&cfg, &question),
         None if question.trim().is_empty() => {
             usage();
             std::process::exit(1);
@@ -153,6 +331,17 @@ fn usage() {
     eprintln!(
         "tny \"question\"               grounded answer from local ZIM corpora\n\
          \n\
+             --ultrafast            best passage from the page, no model    ~1 s\n\
+             --fast                 one article                            ~15 s\n\
+             --slow                 three articles, read twice as deep     ~60 s\n\
+             --molasses             three articles, read as deep as it gets\n\
+                                    default is medium; `+` reads deeper\n\
+         \n\
+             --low                  one-sentence answers\n\
+             --max                  full answers, up to three paragraphs\n\
+             --model <m>            0.8b (default) · 2b · 4b · any hf repo:quant\n\
+                                    both dials stick: what you pick is what you get next time\n\
+         \n\
            -f, --follow               treat this as a follow-up to the last question\n\
                --fresh                re-answer instead of reusing the cached answer\n\
            -v, --verbose              per-stage timings on stderr\n\
@@ -164,11 +353,20 @@ fn usage() {
          tny --corpus update          check the library for newer editions\n\
          \n\
          needs llama-server and kiwix-serve on PATH\n\
-         env: TNY_ZIM, TNY_MODELS, TNY_CHAT, TNY_KIWIX"
+         env: TNY_ZIM, TNY_MODELS, TNY_CHAT, TNY_KIWIX, TNY_MODE"
     );
 }
 
-fn config(verbose: bool, rank_only: bool, dump: bool, context: bool, fresh: bool) -> Result<Cfg, String> {
+fn config(
+    verbose: bool,
+    rank_only: bool,
+    dump: bool,
+    context: bool,
+    fresh: bool,
+    mode: Option<Mode>,
+    len: Option<Len>,
+    model: Option<String>,
+) -> Result<Cfg, String> {
     let home = std::env::var("HOME").map_err(|_| "HOME is not set")?;
     let xdg_data = std::env::var("XDG_DATA_HOME").unwrap_or(format!("{home}/.local/share"));
     let xdg_cache = std::env::var("XDG_CACHE_HOME").unwrap_or(format!("{home}/.cache"));
@@ -181,6 +379,7 @@ fn config(verbose: bool, rank_only: bool, dump: bool, context: bool, fresh: bool
     // live under XDG *data*, not config; `~/.cache/tny` keeps only what is regenerable.
     let cache = PathBuf::from(format!("{xdg_cache}/tny"));
     std::fs::create_dir_all(&cache).map_err(|e| format!("cannot create {}: {e}", cache.display()))?;
+    let (saved_mode, saved_len, saved_model) = load_prefs(&cache);
     Ok(Cfg {
         chat: std::env::var("TNY_CHAT").unwrap_or(format!("http://127.0.0.1:{CHAT_PORT}")),
         kiwix: std::env::var("TNY_KIWIX").unwrap_or(format!("http://127.0.0.1:{KIWIX_PORT}")),
@@ -192,6 +391,21 @@ fn config(verbose: bool, rank_only: bool, dump: bool, context: bool, fresh: bool
         dump,
         context,
         fresh,
+        progress: None,
+        // Flag, then env for a shell that always wants one, then what was last chosen.
+        mode: mode
+            .or_else(|| std::env::var("TNY_MODE").ok().and_then(|v| Mode::parse(&v)))
+            .or(saved_mode)
+            .unwrap_or(Mode::Medium),
+        len: len
+            .or_else(|| std::env::var("TNY_LEN").ok().and_then(|v| Len::parse(&v)))
+            .or(saved_len)
+            .unwrap_or(Len::Medium),
+        model: model
+            .or_else(|| std::env::var("TNY_MODEL").ok())
+            .map(|m| resolve_model(&m))
+            .or(saved_model)
+            .unwrap_or_else(|| MODEL.to_string()),
     })
 }
 
@@ -414,12 +628,19 @@ fn human_bytes(b: u64) -> String {
 struct Spin {
     tx: Option<std::sync::mpsc::Sender<Option<String>>>,
     join: Option<std::thread::JoinHandle<()>>,
+    cell: Option<std::sync::Arc<std::sync::Mutex<String>>>,
 }
 
 impl Spin {
+    /// Hosted: the label goes to the TUI's shared cell and no thread is spawned — the TUI
+    /// already redraws on its own clock, so a second animator would just fight it.
+    fn hosted(cell: &std::sync::Arc<std::sync::Mutex<String>>) -> Spin {
+        Spin { tx: None, join: None, cell: Some(cell.clone()) }
+    }
+
     fn start(on: bool, first: &str) -> Spin {
         if !on {
-            return Spin { tx: None, join: None };
+            return Spin { tx: None, join: None, cell: None };
         }
         let (tx, rx) = std::sync::mpsc::channel::<Option<String>>();
         let mut label = first.to_string();
@@ -438,10 +659,16 @@ impl Spin {
             eprint!("\r\x1b[2K");
             let _ = std::io::stderr().flush();
         });
-        Spin { tx: Some(tx), join: Some(join) }
+        Spin { tx: Some(tx), join: Some(join), cell: None }
     }
 
     fn say(&self, label: impl Into<String>) {
+        if let Some(cell) = &self.cell {
+            if let Ok(mut c) = cell.lock() {
+                *c = label.into();
+            }
+            return;
+        }
         if let Some(tx) = &self.tx {
             let _ = tx.send(Some(label.into()));
         }
@@ -472,6 +699,16 @@ fn human_book(name: &str) -> String {
     }
 }
 
+/// One answered question. The CLI prints it; the TUI draws it.
+struct Answered {
+    code: i32,
+    text: String,
+    sources: Vec<Source>,
+    /// Every candidate that survived ranking — a superset of `sources`, and what steering
+    /// picks from, because the right page is often one the answer was not built from.
+    shortlist: Vec<Source>,
+}
+
 /// An article the answer was built from, kept so the prompt can open or re-use it.
 #[derive(Clone)]
 struct Source {
@@ -487,6 +724,8 @@ enum Next {
     Open(usize),
     /// Print the whole shortlist, not just what was read.
     More,
+    /// Re-ask the same question with more context — the "think harder" key.
+    Harder,
     Again,
     Quit,
 }
@@ -499,8 +738,9 @@ fn run(cfg: &Cfg, question: &str, follow: bool) -> Result<i32, String> {
     let mut q = question.to_string();
     let mut follow = follow;
     let mut focus: Option<Source> = None;
+    let mut cfg = Cfg { mode: cfg.mode, ..cfg.clone() };
     loop {
-        let (code, sources, shortlist) = answer_once(cfg, &q, follow, focus.as_ref())?;
+        let Answered { code, sources, shortlist, .. } = answer_once(&cfg, &q, follow, focus.as_ref())?;
         focus = None;
         let interactive = std::io::stdin().is_terminal()
             && std::io::stderr().is_terminal()
@@ -512,7 +752,7 @@ fn run(cfg: &Cfg, question: &str, follow: bool) -> Result<i32, String> {
         }
         // After the answer, and only here: a check that delays an answer is a check that
         // gets disabled.
-        maybe_offer_update(cfg);
+        maybe_offer_update(&cfg);
         if shortlist.is_empty() && sources.is_empty() {
             return Ok(code);
         }
@@ -521,7 +761,7 @@ fn run(cfg: &Cfg, question: &str, follow: bool) -> Result<i32, String> {
         let list = if shortlist.is_empty() { sources.clone() } else { shortlist };
         let mut showing_all = false;
         loop {
-            match prompt(&list, sources.len(), showing_all)? {
+            match prompt(&list, sources.len(), showing_all, cfg.mode)? {
                 Next::Quit => return Ok(code),
                 Next::Again => continue,
                 Next::More => {
@@ -531,7 +771,7 @@ fn run(cfg: &Cfg, question: &str, follow: bool) -> Result<i32, String> {
                         eprintln!("\x1b[2m {mark}{} {} · {}\x1b[0m", i + 1, human_book(&s.book), s.title);
                     }
                 }
-                Next::Open(i) => open_source(cfg, &list, i),
+                Next::Open(i) => open_source(&cfg, &list, i),
                 // The steer: same question, that source, no retrieval.
                 Next::Use(i) => match list.get(i) {
                     Some(s) => {
@@ -540,6 +780,19 @@ fn run(cfg: &Cfg, question: &str, follow: bool) -> Result<i32, String> {
                         break;
                     }
                     None => continue,
+                },
+                // F94: the same question, read more deeply. Cheaper to press than to retype,
+                // and it is the honest response to "that answer looks thin".
+                Next::Harder => match cfg.mode.next() {
+                    Some(m) => {
+                        cfg.mode = m;
+                        eprintln!("\x1b[2m  reading more — {} mode\x1b[0m", m.name());
+                        break;
+                    }
+                    None => {
+                        eprintln!("\x1b[2m  already at molasses\x1b[0m");
+                        continue;
+                    }
                 },
                 Next::Ask(text, f) => {
                     q = text;
@@ -569,7 +822,7 @@ fn key() -> Option<u8> {
     (n == 1).then_some(b[0])
 }
 
-fn prompt(list: &[Source], read: usize, showing_all: bool) -> Result<Next, String> {
+fn prompt(list: &[Source], read: usize, showing_all: bool, mode: Mode) -> Result<Next, String> {
     // The digits are the steer, not the browser: pointing tny at the right page is the thing
     // a user needs most when the first answer missed, so it costs one keypress. Opening a
     // page in a browser is the rarer want, so it costs two (`o` then the digit).
@@ -578,7 +831,8 @@ fn prompt(list: &[Source], read: usize, showing_all: bool) -> Result<Next, Strin
     } else {
         format!("1-{read} use that source · s see all {} matches", list.len())
     };
-    eprint!("\x1b[2m  ▸ ask a follow-up · {hint} · o open · n new · q quit\x1b[0m\n> ");
+    let harder = if mode.next().is_some() { " · + read more" } else { "" };
+    eprint!("\x1b[2m  ▸ ask a follow-up · {hint}{harder} · o open · n new · q quit\x1b[0m\n> ");
     std::io::stderr().flush().ok();
     // No stty means no single-key mode; one answer and out beats a broken terminal.
     let Some(k) = key() else { return Ok(Next::Quit) };
@@ -595,6 +849,10 @@ fn prompt(list: &[Source], read: usize, showing_all: bool) -> Result<Next, Strin
         b's' => {
             eprintln!();
             Next::More
+        }
+        b'+' => {
+            eprintln!();
+            Next::Harder
         }
         // `o` then a digit: open in the browser. kiwix already serves the corpora over HTTP,
         // so this works with no network.
@@ -670,10 +928,13 @@ fn answer_once(
     question: &str,
     follow: bool,
     focus: Option<&Source>,
-) -> Result<(i32, Vec<Source>, Vec<Source>), String> {
+) -> Result<Answered, String> {
     let t_all = Instant::now();
     let quiet = cfg.rank_only || cfg.dump || cfg.context;
-    let mut spin = Spin::start(std::io::stderr().is_terminal() && !quiet, "starting the library");
+    let mut spin = match &cfg.progress {
+        Some(cell) => Spin::hosted(cell),
+        None => Spin::start(std::io::stderr().is_terminal() && !quiet, "starting the library"),
+    };
     serve_kiwix(cfg)?;
 
     let prev = if follow { recent_turns(cfg, 2) } else { Vec::new() };
@@ -681,12 +942,14 @@ fn answer_once(
     // followed, so the same words after a different question are a different question.
     let key = cache_key(cfg, question, prev.last());
     if focus.is_none() && !cfg.fresh && !cfg.rank_only && !cfg.dump && !cfg.context {
-        if let Some((answer, sources)) = cached(cfg, &key) {
+        if let Some((answer, sources, shortlist)) = cached(cfg, &key) {
             spin.stop();
-            println!("{answer}");
-            eprintln!("\n\x1b[2m  {}   cached\x1b[0m", cite_lines(&sources).join("\n  "));
+            if !cfg.hosted() {
+                println!("{answer}");
+                eprintln!("\n\x1b[2m  {}   cached\x1b[0m", cite_lines(&sources).join("\n  "));
+            }
             save_turn(cfg, question, &answer);
-            return Ok((0, sources.clone(), sources));
+            return Ok(Answered { code: 0, text: answer, sources, shortlist });
         }
     }
     // F29: the retrieval query is `<prev question> <this question>`. NEVER a model rewrite:
@@ -765,7 +1028,12 @@ fn answer_once(
     let t_search = t.elapsed();
     if cands.is_empty() {
         spin.stop();
-        return Ok((no_local_match(cfg, &query), vec![], vec![]));
+        return Ok(Answered {
+            code: no_local_match(cfg, &query),
+            text: String::from("not found"),
+            sources: vec![],
+            shortlist: vec![],
+        });
     }
     // A comparison replaces the shortlist with one article per side, so the model is shown
     // both things it is being asked to compare rather than one and its own imagination.
@@ -797,7 +1065,7 @@ fn answer_once(
         for c in ranked.iter().take(8) {
             println!("{}\t{}\t{}", c.book, c.title, c.path);
         }
-        return Ok((0, vec![], vec![]));
+        return Ok(Answered { code: 0, text: String::new(), sources: vec![], shortlist: vec![] });
     }
     if cfg.dump {
         // Every candidate, unranked, as JSON: lets a scorer be tried offline in
@@ -812,11 +1080,11 @@ fn answer_once(
             })
             .collect();
         println!("{}", serde_json::to_string(&rows).unwrap_or_default());
-        return Ok((0, vec![], vec![]));
+        return Ok(Answered { code: 0, text: String::new(), sources: vec![], shortlist: vec![] });
     }
     // Only now is the model needed: everything above is retrieval. `--context` stops before
     // the load, so inspecting what the model was given costs a search and a fetch.
-    if !cfg.context {
+    if !cfg.context && cfg.mode.generates() {
         spin.say("loading the model");
         serve_chat(cfg)?;
     }
@@ -844,7 +1112,7 @@ fn answer_once(
     // neutral on the fixture (46/58 either way) and costs a case on the held-out set
     // (evidence 50/55 -> 49/55); cap=1 costs three (43/58), because two sections of one
     // article often carry an answer between them. Flooding is real and this is not its fix.
-    for c in ranked.iter().take(top_articles()) {
+    for c in ranked.iter().take(top_articles(cfg)) {
         match article(&cfg.kiwix, &c.book, &c.path) {
             Ok(html) => docs.push((c, html)),
             Err(e) if docs.is_empty() => return Err(e),
@@ -855,11 +1123,11 @@ fn answer_once(
 
     // The budget is split, not multiplied: the same ~3 KB of context, sourced from three
     // articles. F41 measured that a bigger window does not buy accuracy — placement does.
-    let per_doc = top_sections().div_ceil(docs.len().max(1));
+    let per_doc = top_sections(cfg).div_ceil(docs.len().max(1));
     let mut parts = Vec::new();
     let mut heads = Vec::new();
     for (c, html) in &docs {
-        let p = pick_sections(html, &retrieval_q, per_doc, per_section());
+        let p = pick_sections(html, &retrieval_q, per_doc, per_section(cfg));
         if p.text.trim().is_empty() {
             continue;
         }
@@ -871,7 +1139,7 @@ fn answer_once(
     let picked = retrieve::Picked { heads, text: parts.join("\n\n") };
     if cfg.context {
         println!("{}", picked.text);
-        return Ok((0, vec![], vec![]));
+        return Ok(Answered { code: 0, text: String::new(), sources: vec![], shortlist: vec![] });
     }
 
     // F32: grounding reads the whole article, not the slice sent to the model — the slice
@@ -881,22 +1149,33 @@ fn answer_once(
     let full = docs.iter().map(|(_, h)| html2txt(h)).collect::<Vec<_>>().join("\n");
     let vocab = docs.iter().flat_map(|(_, h)| command_vocab(h)).collect::<Vec<_>>();
 
-    spin.say("answering");
+    spin.say(if cfg.mode.generates() { "answering" } else { "reading" });
     let t = Instant::now();
-    let answer = ask(cfg, question, &picked.text, &prev)?;
+    // F95: ultrafast answers from the page itself. Nothing to ground, because nothing was
+    // written — the text is the source's own, and the grounding rules exist to catch a model
+    // saying more than its reference does.
+    let answer = if cfg.mode.generates() {
+        ask(cfg, question, &picked.text, &prev)?
+    } else {
+        retrieve::best_passage(&picked.text, question)
+    };
     let t_gen = t.elapsed();
 
     // F27/F44/F45: three rules, each with its own reference. A false reject is the worst
     // outcome — it turns a correct answer into "not found" — so each was tuned against
     // correct answers as hard as against fabrications.
-    let why = [
-        ungrounded(&answer, &full, question, &picked.text),
-        ungrounded_detail(&answer, &full),
-        ungrounded_shape(&answer, question, &vocab),
-    ]
-    .into_iter()
-    .find(|r| !r.is_empty())
-    .unwrap_or_default();
+    let why = if cfg.mode.generates() {
+        [
+            ungrounded(&answer, &full, question, &picked.text),
+            ungrounded_detail(&answer, &full),
+            ungrounded_shape(&answer, question, &vocab),
+        ]
+        .into_iter()
+        .find(|r| !r.is_empty())
+        .unwrap_or_default()
+    } else {
+        String::new()
+    };
 
     // F83: cite the articles the answer came from, not every article that was read. Three go
     // into context and "why is the sky blue" credited `Sky Blue Sky`, a Wilco album, because
@@ -927,28 +1206,40 @@ fn answer_once(
     }
 
     if !why.is_empty() {
+        if cfg.hosted() {
+            return Ok(Answered {
+                code: 3,
+                text: format!("not found — {why}"),
+                sources: vec![],
+                shortlist,
+            });
+        }
         eprintln!("tny: rejected — {why}");
         // F57: a rejection means the mounted corpora did not carry this answer. That is the
         // one moment a download suggestion is certainly not noise.
         suggest_corpus(cfg, &query);
         println!("not found");
-        return Ok((3, sources, shortlist));
+        return Ok(Answered { code: 3, text: String::from("not found"), sources, shortlist });
     }
-    println!("{}", answer.trim());
+    if !cfg.hosted() {
+        println!("{}", answer.trim());
+    }
     // F75: the source line was `wikipedia_en_top_nopic_2026-06 · Sky Blue Sky · §Release and
     // reception, §Composition, §Sky and sea, §Artificial blues, …` — a filename, a rank-1
     // article that was not where the answer came from, and six section names that mean
     // something only to whoever wrote the ranker. What a reader needs is which works were
     // consulted; sections are diagnostics and moved behind `-v`.
     // Numbered, because the prompt underneath opens them by number.
-    eprintln!(
-        "\n\x1b[2m  {}   {:.1}s\x1b[0m",
-        cite_lines(&sources).join("\n  "),
-        t_all.elapsed().as_secs_f64()
-    );
+    if !cfg.hosted() {
+        eprintln!(
+            "\n\x1b[2m  {}   {:.1}s\x1b[0m",
+            cite_lines(&sources).join("\n  "),
+            t_all.elapsed().as_secs_f64()
+        );
+    }
     save_turn(cfg, question, &answer);
-    cache_put(cfg, &key, answer.trim(), &sources);
-    Ok((0, sources, shortlist))
+    cache_put(cfg, &key, answer.trim(), &sources, &shortlist);
+    Ok(Answered { code: 0, text: answer.trim().to_string(), sources, shortlist })
 }
 
 fn cite_lines(sources: &[Source]) -> Vec<String> {
@@ -1023,7 +1314,7 @@ fn no_local_match(cfg: &Cfg, query: &str) -> i32 {
 }
 
 fn ask(cfg: &Cfg, question: &str, reference: &str, prev: &[(String, String)]) -> Result<String, String> {
-    let mut messages = vec![serde_json::json!({ "role": "system", "content": SYS })];
+    let mut messages = vec![serde_json::json!({ "role": "system", "content": format!("{SYS}{}", cfg.len.clause()) })];
     // F28: keep the prior turns in the message list. History carries the antecedent for
     // elliptical follow-ups ("how do I unlock *it* at boot") — 83 % vs 75 % stateless — and
     // it is cheaper than it looks, because turn 1's prefix is still in the KV cache.
@@ -1043,7 +1334,7 @@ fn ask(cfg: &Cfg, question: &str, reference: &str, prev: &[(String, String)]) ->
         "temperature": 0.1,
         "top_k": 50,
         "repeat_penalty": 1.05,
-        "max_tokens": 160,
+        "max_tokens": cfg.len.tokens(),
         "chat_template_kwargs": { "enable_thinking": false },
     });
     let resp = ureq::post(&format!("{}/v1/chat/completions", cfg.chat))
@@ -1116,8 +1407,56 @@ fn serve_kiwix(cfg: &Cfg) -> Result<(), String> {
     Ok(())
 }
 
-fn serve_chat(cfg: &Cfg) -> Result<(), String> {
+/// The model id the running server reports, e.g. `Qwen3.5-0.8B-Q8_0`. `None` if it is not
+/// answering — treated as "not the one we want", which just means it gets started.
+fn serving(cfg: &Cfg) -> Option<String> {
+    let body = ureq::get(&format!("{}/v1/models", cfg.chat))
+        .timeout(Duration::from_millis(1500))
+        .call()
+        .ok()?
+        .into_string()
+        .ok()?;
+    let j: serde_json::Value = serde_json::from_str(&body).ok()?;
+    let id = j["data"][0]["id"].as_str()?;
+    Some(model_id(id))
+}
 
+/// `ggml-org/Qwen3.5-0.8B-GGUF:Q8_0` and the path llama-server reports both reduce to the
+/// GGUF's stem, which is the only part the two representations share.
+fn model_id(s: &str) -> String {
+    let tail = s.rsplit('/').next().unwrap_or(s);
+    tail.trim_end_matches(".gguf").replace("-GGUF:", "-").to_string()
+}
+
+/// Kill the chat server we started, so the next question can start a different model.
+fn stop_chat(cfg: &Cfg) {
+    let pidfile = cfg.cache.join("chat.pid");
+    if let Ok(pid) = std::fs::read_to_string(&pidfile) {
+        if let Ok(pid) = pid.trim().parse::<u32>() {
+            let _ = Command::new("kill").arg(pid.to_string()).status();
+        }
+    }
+    let _ = std::fs::remove_file(&pidfile);
+    for _ in 0..40 {
+        if !up(&format!("{}/health", cfg.chat)) {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(250));
+    }
+}
+
+fn serve_chat(cfg: &Cfg) -> Result<(), String> {
+    if !cfg.mode.generates() {
+        return Ok(());
+    }
+    let model = cfg.model.as_str();
+    let size = MODELS.iter().find(|(_, r, _)| *r == model).map(|(_, _, s)| *s).unwrap_or("");
+    // F101: a mode switch can mean a different model, and one llama-server serves one model.
+    // Restarting is honest — 1.5 s for the 0.8B — and two servers would not fit in RAM on the
+    // machines this is for.
+    if up(&format!("{}/health", cfg.chat)) && serving(cfg) != Some(model_id(model)) {
+        stop_chat(cfg);
+    }
     if !up(&format!("{}/health", cfg.chat)) {
         if !on_path("llama-server") {
             return Err(NEED_LLAMA.into());
@@ -1125,12 +1464,15 @@ fn serve_chat(cfg: &Cfg) -> Result<(), String> {
         std::fs::create_dir_all(&cfg.models).map_err(|e| format!("cannot create {}: {e}", cfg.models.display()))?;
         // llama.cpp fetches `-hf` models into LLAMA_CACHE itself; say so, because a silent
         // 800 MB first run looks like a hang.
-        if !cfg.models.join(MODEL_DIR).is_dir() {
-            eprintln!("tny: downloading {MODEL} (~800 MB, once) into {}", cfg.models.display());
+        // llama.cpp names its cache dir after the repo; close enough to know whether this
+        // model has ever been fetched, and a wrong guess only costs a printed line.
+        let dir = format!("models--{}", model.split(':').next().unwrap_or(model).replace('/', "--"));
+        if !cfg.models.join(dir).is_dir() {
+            eprintln!("tny: downloading {model} {size}, once, into {}", cfg.models.display());
         }
         let threads = std::thread::available_parallelism().map_or(4, |n| n.get());
         let mut cmd = Command::new("llama-server");
-        cmd.args(["-hf", MODEL, "--no-mmproj", "--jinja", "--host", "127.0.0.1"])
+        cmd.args(["-hf", model, "--no-mmproj", "--jinja", "--host", "127.0.0.1"])
             .args(["-t", &threads.to_string(), "-c", "8192", "--port", &CHAT_PORT.to_string()])
             .env("LLAMA_CACHE", &cfg.models);
         spawn(cmd, cfg, "chat")?;
@@ -1270,10 +1612,64 @@ fn save_turn(cfg: &Cfg, q: &str, a: &str) {
 /// sampling is near-deterministic, so a repeat is a lookup. Keyed by the question and the
 /// turn it follows, because a follow-up's answer depends on what came before; `--fresh`
 /// bypasses it, and a corpus change invalidates it through the book list in the key.
+/// F103: the dials stick. Changing speed in the TUI and finding it back at medium tomorrow
+/// makes the setting decorative — this is a daily tool, and the right speed is a property of
+/// the machine it runs on, not of one question. Two words in a file; a flag still wins for
+/// one invocation.
+fn prefs_path(cfg: &Cfg) -> PathBuf {
+    cfg.cache.join("prefs")
+}
+
+fn load_prefs(cache: &std::path::Path) -> (Option<Mode>, Option<Len>, Option<String>) {
+    let Ok(raw) = std::fs::read_to_string(cache.join("prefs")) else { return (None, None, None) };
+    let mut it = raw.split_whitespace();
+    (
+        it.next().and_then(Mode::parse),
+        it.next().and_then(Len::parse),
+        it.next().map(str::to_string).filter(|s| s.contains('/')),
+    )
+}
+
+/// A named model, or anything llama-server can fetch. `4b` and `unsloth/Whatever-GGUF:Q4_K_M`
+/// are both valid; only the first is one this repo has numbers for.
+fn resolve_model(s: &str) -> String {
+    MODELS
+        .iter()
+        .find(|(key, _, _)| *key == s)
+        .map(|(_, repo, _)| repo.to_string())
+        .unwrap_or_else(|| s.to_string())
+}
+
+fn model_name(repo: &str) -> String {
+    MODELS
+        .iter()
+        .find(|(_, r, _)| *r == repo)
+        .map(|(key, _, _)| key.to_string())
+        .unwrap_or_else(|| repo.split('/').next_back().unwrap_or(repo).to_string())
+}
+
+fn save_prefs(cfg: &Cfg) {
+    let _ = std::fs::write(
+        prefs_path(cfg),
+        format!("{} {} {}", cfg.mode.name(), cfg.len.name(), cfg.model),
+    );
+}
+
 fn cache_key(cfg: &Cfg, question: &str, prev: Option<&(String, String)>) -> String {
     let books = corpus::local(&cfg.zim).join(",");
     let prev_q = prev.map(|(q, _)| q.as_str()).unwrap_or("");
-    format!("{}\u{0}{}\u{0}{}", question.trim().to_lowercase(), prev_q.to_lowercase(), books)
+    // F94: the mode is part of the question. Asking the same thing in molasses after fast is
+    // a different request, and handing back the fast answer would make the flag do nothing;
+    // going back down reuses the earlier answer instead of paying for it twice.
+    format!(
+        "{}\u{0}{}\u{0}{}\u{0}{}\u{0}{}\u{0}{}",
+        question.trim().to_lowercase(),
+        prev_q.to_lowercase(),
+        books,
+        cfg.mode.name(),
+        cfg.len.name(),
+        cfg.model
+    )
 }
 
 fn now_secs() -> u64 {
@@ -1290,28 +1686,41 @@ fn now_secs() -> u64 {
 /// under the same name, and unbounded growth in a cache nobody prunes.
 const CACHE_TTL: u64 = 30 * 24 * 60 * 60;
 
-fn cached(cfg: &Cfg, key: &str) -> Option<(String, Vec<Source>)> {
+/// F99: the shortlist is cached with the answer. Steering is the repair for a bad answer,
+/// and the second time you ask something is exactly when you know it was bad — a cache hit
+/// that dropped the other candidates left you with nothing to steer to but a retype.
+fn cached(cfg: &Cfg, key: &str) -> Option<(String, Vec<Source>, Vec<Source>)> {
     let raw = std::fs::read_to_string(cfg.cache.join("answers.json")).ok()?;
     let j: serde_json::Value = serde_json::from_str(&raw).ok()?;
     let hit = j.get(key)?;
     if now_secs().saturating_sub(hit["at"].as_u64().unwrap_or(0)) > CACHE_TTL {
         return None;
     }
-    let sources = hit["s"]
-        .as_array()?
-        .iter()
-        .filter_map(|s| {
-            Some(Source {
-                book: s["book"].as_str()?.to_string(),
-                path: s["path"].as_str()?.to_string(),
-                title: s["title"].as_str()?.to_string(),
+    let read = |v: &serde_json::Value| -> Vec<Source> {
+        v.as_array()
+            .map(|a| {
+                a.iter()
+                    .filter_map(|s| {
+                        Some(Source {
+                            book: s["book"].as_str()?.to_string(),
+                            path: s["path"].as_str()?.to_string(),
+                            title: s["title"].as_str()?.to_string(),
+                        })
+                    })
+                    .collect()
             })
-        })
-        .collect();
-    Some((hit["a"].as_str()?.to_string(), sources))
+            .unwrap_or_default()
+    };
+    let sources = read(&hit["s"]);
+    // Entries written before the shortlist was cached fall back to what they do have.
+    let shortlist = match read(&hit["l"]) {
+        l if l.is_empty() => sources.clone(),
+        l => l,
+    };
+    Some((hit["a"].as_str()?.to_string(), sources, shortlist))
 }
 
-fn cache_put(cfg: &Cfg, key: &str, answer: &str, sources: &[Source]) {
+fn cache_put(cfg: &Cfg, key: &str, answer: &str, sources: &[Source], shortlist: &[Source]) {
     let path = cfg.cache.join("answers.json");
     let raw = std::fs::read_to_string(&path).unwrap_or_default();
     let mut j: serde_json::Map<String, serde_json::Value> =
@@ -1339,6 +1748,9 @@ fn cache_put(cfg: &Cfg, key: &str, answer: &str, sources: &[Source]) {
             "a": answer,
             "at": now,
             "s": sources.iter().map(|s| serde_json::json!({
+                "book": s.book, "path": s.path, "title": s.title
+            })).collect::<Vec<_>>(),
+            "l": shortlist.iter().map(|s| serde_json::json!({
                 "book": s.book, "path": s.path, "title": s.title
             })).collect::<Vec<_>>(),
         }),

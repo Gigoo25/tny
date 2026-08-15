@@ -21,6 +21,9 @@ macro_rules! re {
 // they carry no retrieval signal.
 re!(STOP = r"(?i)^(how|do|i|the|a|an|my|is|are|why|what|when|where|to|in|on|from|of|for|can|does|with|and|it|not|be|get|set|make|use|versus|vs|difference|differences|between|tradeoff|tradeoffs|pros|cons|better|worse|should|or|choose|choosing|compare|comparison|alternative|alternatives)$");
 re!(NONQUERY = r"[^A-Za-z0-9\s.:+#-]");
+// F93: a flag as the user writes it — `--oneline`, `-p`, `--no-pager`. Anchored to a word
+// boundary so `-p` does not match inside `--pretty`, and the capture is the flag itself.
+re!(FLAG_Q = r"(?:^|\s)(--?[a-zA-Z][a-zA-Z0-9-]*)");
 // F31: deliberately NOT `STOP` — that list strips set/make/use/get, exactly the verbs a
 // section head uses ("Set system clock"). This strips follow-up filler instead. 14/14 was
 // measured with this list.
@@ -208,14 +211,84 @@ pub fn lex_score(head: &str, body: &str, t: &[String]) -> usize {
     s
 }
 
+
+/// F93: a flag question is answered by the flag's own entry, and by nothing else on the page.
+/// `--oneline` occurs three times in git-log(1): twice as a cross-reference ("such as
+/// --oneline", "no --pretty, --format, or --oneline option given") and once as its definition
+/// ("--oneline This is a shorthand for --pretty=oneline --abbrev-commit"). Query-term density
+/// cannot tell those apart — it picked a cross-reference, and the model answered from the
+/// paragraph it was handed: "--oneline disables tab expansion". Wrong, and confidently so.
+///
+/// The definition is the occurrence followed by prose. A cross-reference is followed by
+/// punctuation or by a lowercase continuation ("option given", ". It also"), because the flag
+/// is a noun in someone else's sentence there, not the subject of its own entry.
+fn flag_anchor(text: &str, q: &str) -> Option<usize> {
+    let flag = FLAG_Q.captures(q)?.get(1)?.as_str();
+    let hay = text.as_bytes();
+    let mut best: Option<(i32, usize)> = None;
+    for (i, _) in text.match_indices(flag) {
+        // Must be the whole token: `-p` should not match inside `--pretty`.
+        let before_ok = i == 0 || !matches!(hay[i - 1], b'-' | b'a'..=b'z' | b'A'..=b'Z');
+        let after = &text[i + flag.len()..];
+        let next = after.chars().next().unwrap_or(' ');
+        if !before_ok || next.is_alphanumeric() || next == '-' {
+            continue;
+        }
+        let tail = after.trim_start();
+        let mut score = 0;
+        // "--oneline This is a shorthand …" — an entry states what it does.
+        if tail.chars().next().is_some_and(|c| c.is_ascii_uppercase()) {
+            score += 2;
+        }
+        // "= <ref>" and "<n>" are argument syntax, which is still the entry, not a mention.
+        if tail.starts_with('=') || tail.starts_with('<') {
+            score += 1;
+        }
+        // ". It also overrides", ", or", "option given" — someone else's sentence.
+        if tail.starts_with(['.', ',', ')', '"', '\'', ';']) {
+            score -= 2;
+        }
+        if tail.chars().next().is_some_and(|c| c.is_ascii_lowercase()) {
+            score -= 1;
+        }
+        if best.is_none_or(|(b, _)| score > b) {
+            best = Some((score, i));
+        }
+    }
+    // A page that only ever mentions the flag in passing has no entry to centre on, and the
+    // ordinary density window is as good a guess as any.
+    best.filter(|(s, _)| *s > 0).map(|(_, i)| i)
+}
+
+/// F100: how wide an anchored window may be. A flag entry is one or two sentences; the rest
+/// of the budget only buys the flags either side of it.
+const ANCHORED: usize = 600;
+
 /// F31: the answer is often deeper into a section than the head of it. Selecting the right
 /// section and then slicing its first 600 chars threw the answer away — §Protection in
 /// OpenSSH mentions PermitRootLogin at offset 4,704. Centre the window on the densest run
 /// of query terms instead of the section start.
-pub fn window(text: &str, t: &[String], budget: usize) -> String {
+pub fn window(text: &str, t: &[String], budget: usize, q: &str) -> String {
     let chars: Vec<char> = text.chars().collect();
     if chars.len() <= budget {
         return text.to_string();
+    }
+    // F93: a named flag beats term density — centre the window a little before its entry so
+    // the entry itself is what the model reads.
+    //
+    // F100: and keep it tight whatever the mode asked for. A man page lists flags adjacently,
+    // so widening an anchored window adds *neighbouring entries*, never more of the answer:
+    // at 1200 and 2000 chars `--oneline` picked up `--no-abbrev-commit` next door and the
+    // model reported "--oneline negates --abbrev-commit" — the neighbour's meaning under the
+    // asked flag's name. Measured wrong at slow and molasses, right at fast and medium. The
+    // extra budget is better spent on more sections, which is what the modes also buy.
+    if let Some(byte_at) = flag_anchor(text, q) {
+        let tight = budget.min(ANCHORED);
+        let at = text[..byte_at].chars().count();
+        let cut = at.saturating_sub(tight / 6);
+        let end = (cut + tight).min(chars.len());
+        let body: String = chars[cut..end].iter().collect();
+        return if cut > 0 { format!("… {body}") } else { body };
     }
     let step = (budget / 4).max(80);
     let mut best = 0usize;
@@ -312,7 +385,7 @@ pub fn pick_sections(html: &str, q: &str, top_n: usize, per: usize) -> Picked {
         // Stack Exchange and DevDocs pages have no h2–h5 structure at all.
         return Picked {
             heads: vec!["(lead)".into()],
-            text: window(&html2txt(html), &t, per * top_n),
+            text: window(&html2txt(html), &t, per * top_n, q),
         };
     }
     let mut scored: Vec<(usize, usize)> = secs
@@ -357,11 +430,11 @@ pub fn pick_sections(html: &str, q: &str, top_n: usize, per: usize) -> Picked {
                 let s = &secs[*i];
                 let body = if s.head == "(lead)" {
                     let open = per / 3;
-                    let rest = window(&s.text, &t, per - open);
-                    let opening = window(&s.text, &[], open);
-                    if rest.starts_with(opening.trim_end()) { window(&s.text, &t, per) } else { format!("{opening}\n…\n{rest}") }
+                    let rest = window(&s.text, &t, per - open, q);
+                    let opening = window(&s.text, &[], open, "");
+                    if rest.starts_with(opening.trim_end()) { window(&s.text, &t, per, q) } else { format!("{opening}\n…\n{rest}") }
                 } else {
-                    window(&s.text, &t, per)
+                    window(&s.text, &t, per, q)
                 };
                 format!("## {}\n{}", s.head, body)
             })
@@ -670,14 +743,14 @@ mod tests {
         // the F31 failure: the answer sits far past a 600-char slice of the section
         let filler = "a ".repeat(400);
         let text = format!("{filler}PermitRootLogin no is the setting.{filler}");
-        let w = window(&text, &[String::from("permitrootlogin")], 200);
+        let w = window(&text, &[String::from("permitrootlogin")], 200, "");
         assert!(w.to_lowercase().contains("permitrootlogin"), "window missed the needle: {w}");
     }
 
     #[test]
     fn window_never_starts_mid_word() {
         let text = format!("{}needle here", "word ".repeat(200));
-        let w = window(&text, &[String::from("needle")], 100);
+        let w = window(&text, &[String::from("needle")], 100, "");
         assert!(w.starts_with("… "));
         assert!(!w.contains("… ord"), "started mid-word: {w}");
     }
@@ -712,4 +785,77 @@ mod tests {
         assert_eq!(p.heads, vec!["(lead)".to_string()]);
         assert!(p.text.contains("mkswap"));
     }
+}
+
+/// F95: the answer without the model. F79 measured this arm at 21/58 against the model's
+/// 42/58 — worse, but it costs microseconds instead of 20-40 s, and it is *verbatim source
+/// text*, so it cannot fabricate. That is a fair trade for a first look: a search engine that
+/// shows you the best passage in a second, with the model one keypress away.
+///
+/// Lead plus best match, which beat every other selection rule offline (`bench/extract-cli`):
+/// the opening sentence carries the definition, the best-scoring one carries whatever the
+/// question actually asked about.
+pub fn best_passage(text: &str, q: &str) -> String {
+    let t = terms(q);
+    let sents: Vec<&str> = text
+        .lines()
+        .filter(|l| !l.trim_start().starts_with("##") && l.trim().len() >= 40)
+        .flat_map(split_sentences)
+        .collect();
+    if sents.is_empty() {
+        return text.chars().take(400).collect();
+    }
+    let score = |s: &str| {
+        let low = s.to_lowercase();
+        let hits = t.iter().filter(|w| low.contains(w.as_str())).count() as f64;
+        hits / (s.len() as f64).sqrt()
+    };
+    // A flag question has one right sentence — the flag's own entry — and `--oneline`'s page
+    // holds two decoys that mention it in someone else's sentence. `flag_anchor` already
+    // knows the difference, so ask it rather than letting term density pick a cross-reference.
+    let anchored = flag_anchor(text, q).and_then(|at| {
+        let head = text[at..].split_whitespace().take(4).collect::<Vec<_>>().join(" ");
+        sents.iter().position(|s| s.contains(&head))
+    });
+    let best = anchored.unwrap_or_else(|| {
+        sents
+            .iter()
+            .enumerate()
+            .max_by(|a, b| score(a.1).partial_cmp(&score(b.1)).unwrap_or(std::cmp::Ordering::Equal))
+            .map(|(i, _)| i)
+            .unwrap_or(0)
+    });
+    if best == 0 || (anchored.is_none() && score(sents[best]) <= 0.0) {
+        return sents[0].trim().to_string();
+    }
+    format!("{} {}", sents[0].trim(), sents[best].trim())
+}
+
+/// Sentence boundaries over reference prose. The two things that shatter a naive split are
+/// abbreviations ("e.g.", "Dr.") and decimals ("42.195 km"), and both appear in these corpora.
+fn split_sentences(line: &str) -> Vec<&str> {
+    let b = line.as_bytes();
+    let mut out = Vec::new();
+    let mut start = 0;
+    for i in 0..b.len().saturating_sub(1) {
+        if !matches!(b[i], b'.' | b'!' | b'?') || !b[i + 1].is_ascii_whitespace() {
+            continue;
+        }
+        let tail = line[i + 1..].trim_start();
+        if !tail.chars().next().is_some_and(|c| c.is_ascii_uppercase()) {
+            continue;
+        }
+        // A single capital before the dot is an initial or an abbreviation, not an end.
+        let head = line[start..i].trim_end();
+        if head.len() < 3 || head.ends_with(|c: char| c.is_ascii_uppercase()) {
+            continue;
+        }
+        out.push(&line[start..=i]);
+        start = i + 1;
+    }
+    let tail = line[start..].trim();
+    if !tail.is_empty() {
+        out.push(tail);
+    }
+    out
 }
