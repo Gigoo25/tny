@@ -236,9 +236,11 @@ fn corpus_cmd(cfg: &Cfg, args: &[String]) -> Result<i32, String> {
         "add" => {
             let name = args.get(1).ok_or("usage: tny --corpus add <name>")?;
             corpus::add(&cfg.zim, &cfg.cache, name)?;
+            let added = vec![name.clone()];
             // kiwix-serve mounts its library once at startup, so a new ZIM needs a new
             // process; drop it and the next query picks up the wider library.
             remount(cfg);
+            warn_unsearchable(cfg, &added);
             Ok(0)
         }
         "pack" => {
@@ -302,6 +304,7 @@ fn corpus_cmd(cfg: &Cfg, args: &[String]) -> Result<i32, String> {
                 }
             }
             remount(cfg);
+            warn_unsearchable(cfg, &want.iter().map(|(n, _)| n.clone()).collect::<Vec<_>>());
             if failed > 0 {
                 eprintln!("\n{failed} of {} failed — re-run to resume", want.len());
             }
@@ -983,6 +986,19 @@ fn on_path(bin: &str) -> bool {
 /// machine with no llama.cpp at all, and demanding it there cost a 15-minute benchmark run
 /// that reported 0/58 for a missing PATH entry.
 fn serve_kiwix(cfg: &Cfg) -> Result<(), String> {
+    let zim_count = std::fs::read_dir(&cfg.zim)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter(|e| e.path().extension().is_some_and(|x| x == "zim"))
+        .count();
+    // F89: a live server is not necessarily serving the library on disk. One catalog request
+    // settles it, and a mismatch means the server predates a download — restart it rather
+    // than answer from a library the user no longer has.
+    if up(&format!("{}/", cfg.kiwix)) && mounted_books(cfg).is_some_and(|m| m != zim_count) {
+        eprintln!("tny: kiwix-serve is mounting fewer books than are on disk — restarting it");
+        remount(cfg);
+    }
     if !up(&format!("{}/", cfg.kiwix)) {
         let zims: Vec<PathBuf> = std::fs::read_dir(&cfg.zim)
             .into_iter()
@@ -1041,15 +1057,78 @@ fn spawn(mut cmd: Command, cfg: &Cfg, what: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// F89: a downloaded book is not a mounted book. `remount` killed the pid tny had recorded
+/// and announced success, but the running kiwix-serve is often not that process — an orphan
+/// from a previous session, or a server someone started by hand — and then the pid file is
+/// stale or empty and the kill hits nothing. A pack downloaded 28 MB, reported the library
+/// had grown, and the server carried on serving the seventeen books it was started with.
+///
+/// So: kill what we recorded, then kill whatever still holds our port, then verify the port
+/// is down. Nothing is announced here until it is true.
 fn remount(cfg: &Cfg) {
     let pidfile = cfg.cache.join("kiwix.pid");
     if let Ok(pid) = std::fs::read_to_string(&pidfile) {
         if let Ok(pid) = pid.trim().parse::<u32>() {
             let _ = Command::new("kill").arg(pid.to_string()).status();
-            let _ = std::fs::remove_file(&pidfile);
-            eprintln!("tny: kiwix-serve will restart with the new corpus on the next query");
         }
     }
+    let _ = std::fs::remove_file(&pidfile);
+    let url = format!("{}/", cfg.kiwix);
+    for _ in 0..10 {
+        if !up(&url) {
+            eprintln!("tny: kiwix-serve will restart with the new corpus on the next query");
+            return;
+        }
+        // Our port, our server: a kiwix-serve on KIWIX_PORT owned by this user is one that
+        // tny started, now or in an earlier session, and leaving it up hides the new book.
+        let _ = Command::new("pkill")
+            .args(["-u", &whoami(), "-f", &format!("kiwix-serve --port {KIWIX_PORT}")])
+            .status();
+        std::thread::sleep(Duration::from_millis(300));
+    }
+    eprintln!("tny: something else is holding {} — new books stay invisible until it stops", cfg.kiwix);
+}
+
+fn whoami() -> String {
+    std::env::var("USER").unwrap_or_else(|_| "0".into())
+}
+
+
+/// F89: the catalog's `_ftindex` tag cannot be trusted — it reads `no` for books that search
+/// perfectly — so the only honest test of "will this book ever answer anything" is to ask it
+/// something. One search per new book, after the server has remounted. A book that answers
+/// nothing is not an error; it is a fact the user should hear once, at download time, rather
+/// than never.
+fn warn_unsearchable(cfg: &Cfg, names: &[String]) {
+    if serve_kiwix(cfg).is_err() {
+        return;
+    }
+    let dead: Vec<&String> = names
+        .iter()
+        .filter(|n| retrieve::search_book(&cfg.kiwix, "the file", n, 1).map_or(false, |r| r.is_empty()))
+        .collect();
+    if dead.is_empty() {
+        return;
+    }
+    eprintln!(
+        "tny: no full-text index, so these will never be searched: {}",
+        dead.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", ")
+    );
+}
+
+/// How many books the running server actually mounted. Comparing this against the ZIM files
+/// on disk is the only check that catches every way the two diverge: a pack, a manual copy, a
+/// half-finished download, or a server that outlived the library it was started with.
+fn mounted_books(cfg: &Cfg) -> Option<usize> {
+    let body = ureq::builder()
+        .timeout(Duration::from_secs(5))
+        .build()
+        .get(&format!("{}/catalog/search?count=-1", cfg.kiwix))
+        .call()
+        .ok()?
+        .into_string()
+        .ok()?;
+    Some(body.matches("<entry>").count())
 }
 
 fn up(url: &str) -> bool {
