@@ -2252,6 +2252,48 @@ Worth building only with the full 58-case answer run as the check, not the recal
 Also worth noting from the same table: three articles buy 2 cases over one article read deeper
 (46 vs 43). The multi-article context is much less load-bearing than its cost implies.
 
+## F90 — 2B is slower and no better, and a new book costs rank-1 precision
+
+**2B.** F81 rejected 350M downward; this closes the question upward. Qwen3.5-2B Q4_K_M on the
+instructional set, the class where 350M collapsed and where being wrong costs the user a
+broken command:
+
+```
+            inst correct   refused   wrong   per answer
+0.8B Q8_0      13/18          1        4      ~41 s
+2B Q4_K_M      12/18          3        3      108 s
+```
+
+2.6x the wall clock for one case *fewer*. It trades a wrong answer for a refusal (4→3 wrong,
+1→3 refused), which is the right direction, but not at that price. Prefill is 16.5 t/s against
+33.9 — the 913-token prompt alone is 55 s. 0.8B is the ceiling as well as the floor.
+
+**The man pages cost three cases.** Adding `devdocs_en_man` (12,626 pages, 28 MB) to the
+library, measured before and after on the same build:
+
+```
+               before   after
+context         47/58    46/58
+article@1       37/58    34/58
+book@1          47/58    44/58
+in shortlist    48/58    48/58   ← the right article is still retrieved
+held-out body   54/57    54/57   ← 93 real questions: unchanged
+```
+
+The candidates do not disappear — the shortlist is unmoved — the man pages simply outrank the
+right article for three questions. F70 measured this shape once already: recall is not the
+constraint, ranking precision is, and every book added competes for rank 1.
+
+Worth being precise about what this does and does not say. The 58 cases were built against a
+sixteen-book library and contain no question a man page is the best answer to, so they can
+only measure the cost of adding one. The held-out set — 93 real Stack Exchange questions
+nobody here wrote — moved by nothing at all. The book stays: a terminal tool without man pages
+to answer "what are the flags for X" is missing the question it will be asked most, and the
+measurable harm is confined to a fixture that predates it.
+
+The honest reading of both halves: the model is at its ceiling, and the corpus is at the point
+where adding to it trades one question's answer for another's.
+
 ## Exploration backlog — speed
 
 The cost model, measured (0.8B Q8_0, 4 threads, this CPU):

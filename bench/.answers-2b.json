@@ -1,0 +1,74 @@
+{
+ "how do I change the hostname of my machine": {
+  "ans": "To change your machine's hostname, edit the `/etc/hostname` file to include your desired name or use the `hostnamectl` command. Alternatively, you can temporarily set the hostname using the `hostname` command from inetutils before rebooting.",
+  "err": "\n\u001b[2m  1 Arch Wiki · Network configuration\n  2 devdocs git · git config   115.6s\u001b[0m\n"
+ },
+ "how do I enable a systemd service so it starts at boot": {
+  "ans": "To enable a systemd service that starts at boot, you must use the `systemctl enable` command followed by the name of your service file (e.g., `systemctl enable my.service`). This ensures the service is started automatically when the system boots.",
+  "err": "\n\u001b[2m  1 Arch Wiki · Systemd\n  2 Wikipedia · Systemd\n  3 Wikipedia · Systemd   91.0s\u001b[0m\n"
+ },
+ "how do I add a new user with useradd": {
+  "ans": "To add a new user named \"alice\" using the `useradd` command, run the following: `useradd -m -d /home/alice -c \"ALICE ADMIN\" -s /usr/bin/bash alice`. This creates the home directory at `/home/alice`, sets the shell to `/usr/bin/bash`, and automatically assigns the user to an \"alice\" group.",
+  "err": "\n\u001b[2m  1 Arch Wiki · Users and groups\n  2 unix.stackexchange · Cannot add user with useradd command   87.9s\u001b[0m\n"
+ },
+ "how do I resize an ext4 filesystem": {
+  "ans": "To resize an ext4 filesystem, use the `resize2fs` command with the device path and desired size, specifying the partition size if it is not already set to the current partition size. Ensure the filesystem is unmounted before resizing and be prepared to adjust the partition size beforehand if you intend to enlarge it.",
+  "err": "\n\u001b[2m  1 Arch Wiki · Ext4\n  2 Arch Wiki · Parted   136.1s\u001b[0m\n"
+ },
+ "how do I mount a filesystem by UUID in fstab": {
+  "ans": "To mount a filesystem by UUID in `/etc/fstab`, you must specify the UUID value followed by the device path and mount options, such as `UUID=b411dc99-f0a0-4c87-9e05-184977be8539 /home ext4 defaults 0 2`.",
+  "err": "\n\u001b[2m  1 Arch Wiki · Fstab\n  2 Wikipedia · Universally unique identifier   138.4s\u001b[0m\n"
+ },
+ "how do I enable the en_US.UTF-8 locale": {
+  "ans": "To enable the `en_US.UTF-8` locale, uncomment the corresponding entry in `/etc/locale.gen` and run the command `locale-gen`. Alternatively, you can add `LC_MEASUREMENT=C.UTF-8` to your `/etc/locale.conf` file if your tool searches for this variable.",
+  "err": "\n\u001b[2m  1 Arch Wiki · Locale   129.6s\u001b[0m\n"
+ },
+ "how do I let a user run commands with sudo": {
+  "ans": "To allow a user to run commands with sudo, you must create an entry in the `/etc/sudoers` file that specifies the user and their privileges using the format `user hostname =(ALL:ALL) ALL`. For example, to allow the `archie` user to run as any user on a single machine, add the line `archie hostname =(ALL:ALL) ALL` to this file. After editing, you must run `visudo` to save the configuration and then restart the `sudo` service for changes to take effect.",
+  "err": "\n\u001b[2m  1 Arch Wiki · Sudo   96.0s\u001b[0m\n"
+ },
+ "how do I undo the last commit but keep my changes": {
+  "ans": "To undo the last commit while keeping your changes, run `git reset --mixed HEAD~1`. This reverts the index to match the previous commit without discarding your working directory files.",
+  "err": "\n\u001b[2m  1 devdocs git · git reset   73.1s\u001b[0m\n"
+ },
+ "how do I change the message of my last commit": {
+  "ans": "To change the message of your last commit in Git, you must first stage the changes with `git add .` and then use the command `git commit -m 'new message'`. If you want to revert a specific file's changes before committing, run `git restore --staged <file>`.",
+  "err": "\n\u001b[2m  1 devdocs git · git commit   81.1s\u001b[0m\n"
+ },
+ "how do I create a docker image tag for a registry": {
+  "ans": "not found",
+  "err": "tny: rejected — command not in reference: image_name\n     the library has:\n       Docker Docs                         2 MB  tny --corpus add devdocs_en_docker\n       scikit-image Docs                  11 MB  tny --corpus add devdocs_en_scikit-image\n       Signal Processing Q&A             378 MB  tny --corpus add dsp.stackexchange.com_en_all\n"
+ },
+ "how do I add a login role with a password in postgresql": {
+  "ans": "not found",
+  "err": "tny: rejected — identifier not in reference: my_role, secure_password\n     the library has:\n       PostgreSQL Docs                     3 MB  tny --corpus add devdocs_en_postgresql\n       Role-playing Games Q&A            337 MB  tny --corpus add rpg.stackexchange.com_en_all\n       Parenting Q&A                      60 MB  tny --corpus add parenting.stackexchange.com_en_all\n"
+ },
+ "how do I create a virtual environment in python": {
+  "ans": "To create a virtual environment, you can use the `python -m venv` command followed by the desired directory path, such as `python -m venv myenv`. Alternatively, you can install and run the `venv` module using the Python interpreter specified in your system's Python version.",
+  "err": "\n\u001b[2m  1 Arch Wiki · Python/Virtual environment\n  2 Arch Wiki · Python\n  3 devdocs python · 12. Virtual Environments and Packages   160.2s\u001b[0m\n"
+ },
+ "what does unwrap_or_default return on an Option": {
+  "ans": "not found",
+  "err": "tny: rejected — command not in reference: unwrap_or_default\n"
+ },
+ "how does bash substitute a default value if a variable is unset": {
+  "ans": "Bash assigns a default value to an unset variable using the parameter expansion syntax `${VAR:=default}`. This command substitutes the default value only if the variable is currently unset, leaving it unchanged otherwise.",
+  "err": "\n\u001b[2m  1 unix.stackexchange · Bash function that assigns a default value to unset variables\n  2 devdocs bash · Bash Variables\n  3 unix.stackexchange · How do I assign a value to a BASH variable if that variable is null/unassigned/falsey?   93.9s\u001b[0m\n"
+ },
+ "what does the --oneline flag do in git log": {
+  "ans": "The `--oneline` flag displays a short, one-line summary of each commit instead of the full subject line.",
+  "err": "\n\u001b[2m  1 devdocs git · git log\n  2 devdocs git · git shortlog   67.2s\u001b[0m\n"
+ },
+ "what arguments does json.dumps take": {
+  "ans": "The `json.dumps` function accepts a single object argument and optional keyword arguments such as `skipkeys`, `ensure_ascii`, `check_circular`, `allow_nan`, `cls`, `indent`, `separators`, `default`, `sort_keys`, and `**kw`.",
+  "err": "\n\u001b[2m  1 devdocs python · json   90.6s\u001b[0m\n"
+ },
+ "what precision does the numeric data type have in postgresql": {
+  "ans": "PostgreSQL supports arbitrary-precision numeric types with variable precision, where the number of decimal digits is determined by the application rather than fixed limits. The precision of a numeric value is defined as the total count of significant digits in the whole number, while the scale represents the count of decimal digits to the right of the decimal point.",
+  "err": "\n\u001b[2m  1 devdocs postgresql · Numeric Types\n  2 Wikipedia · PostgreSQL   101.6s\u001b[0m\n"
+ },
+ "what does the --rm option do in docker run": {
+  "ans": "The `--rm` option causes the container to be automatically removed after it finishes executing its command.",
+  "err": "\n\u001b[2m  1 devdocs docker · Docker run reference   111.4s\u001b[0m\n"
+ }
+}
