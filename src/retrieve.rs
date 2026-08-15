@@ -208,6 +208,19 @@ pub fn sections_of(html: &str) -> Vec<Section> {
         })
         .collect();
     let mut out = Vec::new();
+    // F67: the lead was never a section. This loop starts *at* the first heading, so every
+    // character before it was dropped — and on Wikipedia that is exactly where the
+    // definitional fact lives: "Jupiter has 97 known moons", "Kilimanjaro is 5,895 m high".
+    // Asked "how many moons does jupiter have", tny sent §Origin and evolution and §Irregular
+    // satellites, which mention moons constantly and count none of them. The lead now
+    // competes on score like any other section rather than being handed a slot: on a Stack
+    // Exchange page the lead is the question, and the answer is below it.
+    if let Some((_, first, _)) = heads.first() {
+        let lead = html2txt(&html[..*first]);
+        if lead.len() > 80 {
+            out.push(Section { head: "(lead)".into(), text: lead });
+        }
+    }
     for (i, (head, _, end)) in heads.iter().enumerate() {
         let stop = heads.get(i + 1).map_or(html.len(), |(_, at, _)| *at);
         let text = html2txt(&html[*end..stop]);
@@ -263,7 +276,25 @@ pub fn pick_sections(html: &str, q: &str, top_n: usize, per: usize) -> Picked {
         heads: top.iter().map(|(i, _)| secs[*i].head.clone()).collect(),
         text: top
             .iter()
-            .map(|(i, _)| format!("## {}\n{}", secs[*i].head, window(&secs[*i].text, &t, per)))
+            // F67: a lead is inverted-pyramid, so its first sentence is the definitional fact
+            // — "Jupiter has N known moons", "Kilimanjaro is 5,895 m high" — while `window`
+            // centres on the densest run of query terms and cut exactly that opening.
+            // Prefix-only would be the opposite mistake: it optimises headline questions and
+            // loses the deep ones, where the evidence sits further down the lead. So the lead
+            // splits its budget, a third for the opening and the rest centred, and every other
+            // section is a fragment of an argument where centring is simply right.
+            .map(|(i, _)| {
+                let s = &secs[*i];
+                let body = if s.head == "(lead)" {
+                    let open = per / 3;
+                    let rest = window(&s.text, &t, per - open);
+                    let opening = window(&s.text, &[], open);
+                    if rest.starts_with(opening.trim_end()) { window(&s.text, &t, per) } else { format!("{opening}\n…\n{rest}") }
+                } else {
+                    window(&s.text, &t, per)
+                };
+                format!("## {}\n{}", s.head, body)
+            })
             .collect::<Vec<_>>()
             .join("\n\n"),
     }

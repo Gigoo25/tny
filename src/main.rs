@@ -66,6 +66,9 @@ struct Cfg {
     rank_only: bool,
     /// Dump every retrieved candidate as JSON and stop, for offline scorer sweeps.
     dump: bool,
+    /// Print the exact text handed to the model and stop, without loading it. Answers the
+    /// only question that separates a retrieval failure from a model failure (F67).
+    context: bool,
 }
 
 fn main() {
@@ -73,6 +76,7 @@ fn main() {
     let mut verbose = false;
     let mut rank_only = false;
     let mut dump = false;
+    let mut context = false;
     let mut follow = false;
     let mut corpus_args: Option<Vec<String>> = None;
     let mut args = std::env::args().skip(1);
@@ -81,6 +85,7 @@ fn main() {
             "-v" | "--verbose" => verbose = true,
             "--rank" => rank_only = true,
             "--dump" => dump = true,
+            "--context" => context = true,
             "-f" | "--follow" => follow = true,
             "--corpus" => corpus_args = Some(args.by_ref().collect()),
             "-h" | "--help" => {
@@ -100,7 +105,7 @@ fn main() {
         }
     }
 
-    let cfg = match config(verbose, rank_only, dump) {
+    let cfg = match config(verbose, rank_only, dump, context) {
         Ok(c) => c,
         Err(e) => {
             eprintln!("tny: {e}");
@@ -142,7 +147,7 @@ fn usage() {
     );
 }
 
-fn config(verbose: bool, rank_only: bool, dump: bool) -> Result<Cfg, String> {
+fn config(verbose: bool, rank_only: bool, dump: bool, context: bool) -> Result<Cfg, String> {
     let home = std::env::var("HOME").map_err(|_| "HOME is not set")?;
     let xdg_data = std::env::var("XDG_DATA_HOME").unwrap_or(format!("{home}/.local/share"));
     let xdg_cache = std::env::var("XDG_CACHE_HOME").unwrap_or(format!("{home}/.cache"));
@@ -166,6 +171,7 @@ fn config(verbose: bool, rank_only: bool, dump: bool) -> Result<Cfg, String> {
         verbose,
         rank_only,
         dump,
+        context,
     })
 }
 
@@ -297,8 +303,11 @@ fn run(cfg: &Cfg, question: &str, follow: bool) -> Result<i32, String> {
         println!("{}", serde_json::to_string(&rows).unwrap_or_default());
         return Ok(0);
     }
-    // Only now is the model needed: everything above is retrieval.
-    serve_chat(cfg)?;
+    // Only now is the model needed: everything above is retrieval. `--context` stops before
+    // the load, so inspecting what the model was given costs a search and a fetch.
+    if !cfg.context {
+        serve_chat(cfg)?;
+    }
     let best = &ranked[0];
 
     // F58: three articles, not one. Rank-1 carries the answer for 36 of 58 verified cases,
@@ -334,6 +343,10 @@ fn run(cfg: &Cfg, question: &str, follow: bool) -> Result<i32, String> {
         heads.extend(p.heads);
     }
     let picked = retrieve::Picked { heads, text: parts.join("\n\n") };
+    if cfg.context {
+        println!("{}", picked.text);
+        return Ok(0);
+    }
 
     // F32: grounding reads the whole article, not the slice sent to the model — the slice
     // rejected a correct answer for citing `cryptsetup` from a neighbouring section. With
