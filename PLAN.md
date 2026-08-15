@@ -3,25 +3,32 @@
 Findings and evidence live in `NOTES.md`; every decision here cites one. This file
 is the build sequence.
 
+## Status
+
+**All of P0-P4 is built and measured** (P5 was cut — see *Deliberately not built*). This file
+is the design and the reasoning; `README.md` is how to run it and where it currently stands;
+`NOTES.md` is the 107 findings with the numbers. When they disagree, `NOTES.md` wins — it is
+the only one written at the time of measurement.
+
 ## What it is
 
 A fully offline terminal search engine with a small model as the front end.
-`tny "question"` → grounded answer on stdout, source on stderr.
 
 ```
 tny "how do I set the system timezone"      # Arch Wiki ZIM
 tny "what does Vec::with_capacity do"       # DevDocs ZIM, anchor-sliced
 tny "how many neurons does C. elegans have" # Wikipedia ZIM
-tny "what is wrong" < paste.txt              # piped tool output, 5/6 (F42)
-tny -d "explain what a mutex is"            # no lookup
-tny "ext4 or btrfs"                         # comparison -> asks which side you mean
-tny --corpus list|add <name>|rm <name>      # manage ZIMs
+tny "ext4 or btrfs"                         # comparison -> both sides retrieved
+tny                                         # the interface: transcript, sources, vim keys
+tny --ultrafast|--fast|--slow|--molasses    # how much to read (F94)
+tny --low|--max                             # how much to write (F102)
+tny --model 0.8b|2b|4b                      # who answers (F101)
+tny --corpus list|search|add|pack|update    # manage ZIMs
 tny -v "..."                                # per-stage timings
-tny --stop                                  # stop supervised servers
 ```
 
-Answer → **stdout**. Source (book · article · sections), timings, errors →
-**stderr**, so `tny "..." | pbcopy` does the obvious thing.
+Answer → **stdout**. Sources, timings, errors → **stderr**, so `tny "..." | pbcopy` does the
+obvious thing. A terminal with no redirection gets the full interface instead (F96).
 
 ## The pipeline (every stage measured)
 
@@ -37,31 +44,33 @@ query  (+ previous turns, if any)
   ├─ 1. prep: strip question words, stopwords, and     F15/F35  raw query → 0 hits;
   │        comparison words — kiwix ANDs every term            "string versus str
   │        so one stray word returns nothing at all            slice" → 0 hits
-  ├─ 2. search ALL mounted ZIMs, no routing              F12  content picks the book
-  │      /search?pattern=…&format=xml  (no books.name)  F11  title+link+snippet
-  │      each <link> names its book; `_ftindex:no` ZIMs F12  real body-level FTS
-  │      are searched too — the tag must not gate this
+  ├─ 2. search each mounted ZIM separately, 8 hits each   F49  one shared query dilutes
+  │      /search?books.name=…&pattern=…&format=xml       F63  8 hits lifts recall 54→55
+  │      four books in flight; `_ftindex:no` ZIMs are    F12  the tag lies both ways
+  │      searched too, and probed on arrival (F89)
   ├─ 3. filter: drop "(Magyar)"-style dupes, dedupe      F14  half the list was noise
-  ├─ 4. rank: RRF(xapian order, lexical title+snippet)   F31  9/10, no embedder
-  ├─ 5. fetch article by path                            F11
+  ├─ 4. rank: lexical title+body+kind prior, no model    F49/F59/F91  RRF lost, 17/32
+  ├─ 5. fetch the top 1-3 articles by path               F58  answer in top-3 for 45/58
   ├─ 6. extract
-  │      wiki pages → split h2–h5, embed-rank sections,  F31  14/14 in 1.5 KB
-  │                   take top 3, window each on terms        (h2-only: 12/14)
+  │      wiki pages → split h2–h5, lexical section rank, F31  14/14 in 1.5 KB
+  │                   take top N, window each on terms         (h2-only: 12/14)
+  │      flag questions → window on the flag's own entry F93  48/58 in context, +2
   │      ref  pages → slice by #anchor                   F13  240 anchors survive
   ├─ 7. denoise: citation markers, [edit], link refs      F8
-  ├─ 8. answer: Qwen3.5-0.8B, thinking OFF, ≤160 tok      F19/F20  6/6
-  │        keep prior turns in the message list           F28  83% vs 75% stateless
+  ├─ 8. answer: Qwen3.5-0.8B, thinking OFF, 80–512 tok    F19/F20  6/6
+  │        keep up to five prior turns in the message list F84  "it" resolves 3 deep
   └─ 9. verify grounding against the FULL article,        F27/F32  refusal 4/6 → 6/6,
          else say "not found"                                      0 false rejects
 ```
 
-Stage 6 is the only embedder user — 35 MB of bge-small, which reaches 14/14 in **44 %
-less context** than the model-free lexical fallback needs, and prefill dominates
-latency here (F31). Stage 4 dropped its embedding calls for a free lexical fusion at
-equal score. Stage 8 never selects anything — the chat model only adapts and formats
-(F16, F29) — and stage 9 is a regex, not a model: it rejects answers proposing
-commands absent from the source article, which is the entire measured advantage of a
-2.5× larger model (F26, F27).
+**No embedder.** Stage 6 used one for six sessions — 35 MB of bge-small, 14/14 in 44 % less
+context than lexical needed (F31) — and F79 removed it: against the 58-case fixture a
+bi-encoder scored 21/58 and two cross-encoders 17–19/58, all at or below one line of lexical
+scoring, and far below the model reading three articles (42/58). Stage 4 dropped its
+embedding calls earlier for the same reason. Stage 8 never selects anything — the chat model
+only adapts and formats (F16, F29, F79) — and stage 9 is a regex, not a model: it rejects
+answers proposing commands absent from the source article, which is the entire measured
+advantage of a 2.5× larger model (F26, F27), and of a 5× larger one (F107).
 
 Grounding reads the **whole fetched article**, not the 1.5 KB slice sent to the model:
 the slice rejected a correct answer for citing `cryptsetup` from a neighbouring section
@@ -70,21 +79,22 @@ the slice rejected a correct answer for citing `cryptsetup` from a neighbouring 
 ## Shape
 
 ```
-main.rs       arg parse, orchestration, grounding check, output ~230 loc
-supervise.rs  spawn / health / reuse of three servers         ~130 loc
-retrieve.rs   search, suggest, filter, RRF, sections, anchors ~330 loc
-              + comparison split / clarify prompt
-corpus.rs     catalog parse, ZIM download + verify + resume   ~140 loc
+main.rs       arg parse, orchestration, grounding, dials, cache   1,773 loc
+retrieve.rs   search, filter, rank, sections, windowing, extract    861 loc
+corpus.rs     catalog parse, packs, ZIM download + verify + resume  615 loc
+tui.rs        transcript, shortlist, steering, vim keys             600 loc
+ground.rs     the grounding rules and html→text                    417 loc
 ```
 
-Four files, ~830 lines. Three deps: `ureq` (blocking HTTP + TLS + gzip),
-`serde_json`, `regex`.
+Five files, 4,266 lines. Four deps: `ureq` (blocking HTTP + TLS + gzip), `serde_json`,
+`regex`, `ratatui` (+`crossterm`).
 
-**No async runtime** — the pipeline is sequential except one batched embeddings
-call; tokio/hyper/reqwest would add ~200 crates to serialize the same round trips.
-**No `clap`** (few flags), **no HTML parser** (regex strip + `indexOf` anchor
-slicing is exactly what was verified), **no `serde` derive** (`serde_json::Value`
-indexing over read-once responses), **no `dirs`** (3 lines of XDG fallback).
+**No async runtime** — the pipeline is sequential apart from four book searches in flight
+(F78: `std::thread`, 1.07 s → 0.67 s) and the TUI's one worker thread; tokio/hyper/reqwest
+would add ~200 crates to serialize the same round trips. **No `clap`** (the flags are a
+`match` on `&str`), **no HTML parser** (regex strip + `indexOf` anchor slicing is exactly what
+was verified), **no `serde` derive** (`serde_json::Value` indexing over read-once responses),
+**no `dirs`** (3 lines of XDG fallback).
 
 ## Load-bearing decisions
 
@@ -105,9 +115,12 @@ context 5/6 vs 4/6, and stage 10's regex takes both models to 6/6 (F27). Downwar
 **2. Empty `content` is an error, never an answer.** llama.cpp routes reasoning to
 `reasoning_content`, so a naive client prints blanks silently (F19).
 
-**3. Selection model: bge-small-en-v1.5 Q8_0 (33 M params, 35 MB).** Beats the chat
-model at choosing (F16 vs F17) at 1/25 the size. Query prefix `"Represent this
-sentence for searching relevant passages: "` is required.
+**3. Selection is lexical, and there is no selection model.** bge-small held this slot for
+six sessions on a 14-case fixture. On the 58-case one it lost: bi-encoder 21/58, cross-encoder
+(jina-tiny 33 M) 17/58, cross-encoder (bge-reranker-base 278 M) 19/58, lexical 21/58, and the
+model reading three articles 42/58 — while an oracle over every sentence reaches 43/58, so the
+answer *is* one sentence in the text and no reranker finds it (F79). One server fewer, one
+model fewer, 2.3 s per question saved.
 
 **4. The chat model never chooses.** 350M emitted a near-constant index (#7,#7,#5,
 #7,#7,#8); Qwen judged 3/6 versus free rank-1's 4/6 and RRF's 5/6 (F16).
@@ -134,24 +147,33 @@ the model**.
 **11. Print the source.** Book · article · section headings, so a wrong answer is
 checkable rather than silent.
 
-**12. Three supervised processes** (`kiwix-serve`, chat, embeddings), ~1.3 GB RSS.
-Dropping bge saves a process and 2.3 s/query but costs −1/10 on articles *and* halves
-section accuracy (F22) — the section win is what earns it.
+**12. Two supervised processes** (`kiwix-serve`, chat), ~1.2 GB RSS. The embedder was the
+third for six sessions; F79 removed it — the section win it was earning on a 14-case fixture
+did not survive the 58-case one. `serve_kiwix` re-checks on every question that the running
+server's mounted set still matches the ZIMs on disk, because a downloaded book is not a
+mounted book (F89).
 
-**13. llama.cpp downloads both models** via `-hf ggml-org/Qwen3.5-0.8B-GGUF:Q8_0`
-and `-hf ggml-org/bge-small-en-v1.5-Q8_0-GGUF`. Zero model-download code in `tny`.
+**13. llama.cpp downloads the model** via `-hf ggml-org/Qwen3.5-0.8B-GGUF:Q8_0`, and any
+model named by `--model` the same way. Zero model-download code in `tny`; ZIMs are a different
+matter — those `tny --corpus` fetches itself, resumable and byte-verified.
 
 ## Corpus profiles (real sizes, `NOTES.md` catalogue)
 
 Disk is the one genuine tradeoff, so ship tiers rather than one default download.
 
-| Profile | Contents | Size |
+Shipped as `tny --corpus pack <name>`, sizes from the live catalogue (F87):
+
+| Pack | Contents | Size |
 |---|---|---|
-| **min** | devdocs (rust, python, bash, git, go, javascript) + archlinux | ~82 MB |
-| **standard** | + devdocs_en_man + mankier + wikipedia_en_100 | ~630 MB |
-| **wide** | + wikipedia_en_wp1-0.8 mini (855 k articles) | ~3 GB |
-| **deep** | + unix.stackexchange + topical SE sites | ~5 GB |
-| **max** | + wikipedia_en_all mini (12.5 GB) | ~18 GB |
+| **mini** | devdocs man, bash, git, python + a general floor | ~28 MB |
+| **small** | + devdocs docker, postgresql, rust, cpp, archlinux | ~313 MB |
+| **medium** | + wikipedia topical (computer, physics, chemistry, maths) | ~3.1 GB |
+| **large** | + Stack Exchange, ifixit, wikibooks | ~18.9 GB |
+| **huge** | + all of Wikipedia, all of Stack Overflow, Wiktionary | ~151 GB |
+
+The two genuinely surprising catalogue finds: **12,626 man pages for 28 MB**, the best
+value in the whole library for a terminal tool, and `docs.python.org` at 92 MB against
+DevDocs' 4 MB for the same language (F87).
 
 Never `stackoverflow.com_en_all` (**80.5 GB**) by default. Catalog:
 `library.kiwix.org/catalog/v2/entries?lang=eng&count=-1`; download links arrive as
@@ -177,52 +199,55 @@ books.json    book id, _ftindex flag, article count (from the local catalog)
 No answer cache, no config file — env vars only (`TNY_ZIM_DIR`, `TNY_PORT`,
 `TNY_THREADS`, `TNY_LLAMA_SERVER`, `TNY_KIWIX_SERVE`).
 
-## Phases
+## Phases — all shipped
 
-Each ends runnable; none merged on a claim.
+Each ended runnable; none was merged on a claim. Kept as a record of what each one had to
+prove, because the checks are still the fastest way to tell whether something has rotted.
 
-**P0 — spine.** `supervise.rs`: spawn/reuse/health for three servers, arg parse,
-streaming, stdout/stderr split, empty-`content` guard (F19).
-Check: `tny -d "explain what a mutex is"` streams an answer; a second invocation
-skips model load; `tny --stop` stops all three.
+**P0 — spine.** Spawn/reuse/health for two servers (the embedder was dropped — F79: every
+embedding-based selector lost to lexical scoring), arg parse, stdout/stderr split,
+empty-`content` guard (F19), mount-drift detection (F89).
+Check: `tny "what is a swap file"` answers with both servers cold; a second invocation is a
+cache read (F85).
 
-**P1 — retrieval.** Query prep, book discovery via `/catalog/v2/entries` including
-`_ftindex`, `/search`, localisation filter, dedupe, batched embeddings, RRF.
-Check: `tny -v "mount a usb drive automatically"` ranks **Udisks** first and prints
-the ranking; `bun bench/harness.mjs rank` still scores ≥9/10.
+**P1 — retrieval.** Query prep, per-book search (F49), localisation filter, dedupe, lexical
+ranking. RRF exists behind `TNY_RANK=rrf` and lost (F91).
+Check: `bun bench/rank-cli.mjs` → `article@1 34/58 · in shortlist 48/58 · book@1 44/58`.
 
-**P2 — extraction + answer.** Section split, embed-rank top-3, denoise, terse
-contract, source line.
-Check: `bun bench/harness.mjs sections` → answer present 6/6; `answers` → 6/6 with
-`timedatectl set-timezone`, `mkswap`, `ssh-keygen`, `cryptsetup luksFormat` appearing,
-and `refuse` → 6/6 safe with 0 false rejects (F27's check is part of this phase, not
-a later hardening pass — it is what keeps 0.8B honest).
+**P2 — extraction + answer.** Section split, lexical section selection, density and
+flag-entry windowing (F31/F93/F100), denoise, terse contract, grounding check, source line.
+Check: `bun bench/ctx-cli.mjs` → `context has the fact 48/58`; `cargo test` → 16 passing,
+which are the grounding cases that keep a 0.8B honest.
 
-**P3 — reference books.** `/suggest?content=` → path → `#anchor` slice; exact →
-prefix → substring name matching.
-Check: `tny "what does Vec::with_capacity do"` returns the real method, not
-nightly-only `try_with_capacity` (the F13 trap).
+**P3 — reference books.** `/search?books.name=` → path → section slice; exact → prefix →
+substring name matching; searchability probe on every new book (F89).
+Check: `tny "what does the -p flag do in mkdir"` answers from `mkdir(3p)`, not from a page
+that merely mentions it (F93).
 
-**P4 — corpus management.** `tny --corpus list|add|rm`, catalog parse, profile
-install, `.meta4` strip, free-space preflight.
-Check: `tny --corpus add archlinux` fetches and serves with no manual `kiwix-serve`.
+**P4 — corpus management.** `tny --corpus list|search|add|pack|update`, catalog parse, packs
+by shelf, resumable byte-verified downloads, 30-day staleness check offered *after* an
+answer (F88).
+Check: `tny --corpus pack mini` fetches and serves with no manual `kiwix-serve`.
 
-**P5 — local files.** Path-token detection → read → same contract. Fixes the one V2
-routing failure (F7) deterministically instead of by prompt.
-Check: `tny "summarize src/main.rs"` reads the file, no search.
+**P6 — the interface.** ratatui TUI: scrolling transcript, shortlist, steering, three
+persisted dials, vim keys (F94-F103).
+Check: `tny`, type a question, `1`-`9` then `⏎` to read a different source, `:q`.
+
+**P5 — local files.** Cut, not built (F41). See *Deliberately not built*.
 
 ## Verification
 
-`#[cfg(test)]` asserts on the pure functions — `prep`, localisation filter, dedupe,
-RRF ordering, section split, anchor slice, **grounding check** — against fixed
-strings. The grounding tests are the **17 cases already passing** in
-`bun bench/harness.mjs ground` (pure, no servers), which is the port target: allow a
-short `du -h`, a fenced block, a bare `# cmd` prompt line, an unmarked command, a
-quoted path and a refusal; catch `ssh-keygen` absent from a swap reference,
-`mkfs.ext4` for a mount question, a question echo, a question asked back, and empty
-content. No network, no
-framework. Network paths are covered by the per-phase commands and
-`bench/harness.mjs`.
+`#[cfg(test)]` asserts on the pure functions — `prep`, term selection, localisation filter,
+dedupe, section split, windowing, **grounding check** — against fixed strings: **16 tests,
+`cargo test`, no network and no framework.** They are the port of the grounding cases from
+`bun bench/harness.mjs ground`: allow a short `du -h`, a fenced block, a bare `# cmd` prompt
+line, an unmarked command, a quoted path and a refusal; catch `ssh-keygen` absent from a swap
+reference, `mkfs.ext4` for a mount question, a question echo, a question asked back, and
+empty content.
+
+Everything that touches the network or the corpus is a `bench/*-cli.mjs` guard against the
+58-case fixture, and each pins its own configuration (F105). Current numbers are in
+`README.md`; how each was arrived at is in `NOTES.md`.
 
 Three regression tests earn their place:
 - **F9**: the recorded Stack Exchange answer through the real system prompt must not
@@ -250,5 +275,12 @@ Three regression tests earn their place:
 - **Thread autotune** — F3's +25% hyperthread win was on 1.2B Q4_0, untested for
   Qwen-0.8B Q8_0. `-t` = physical cores, `TNY_THREADS` overrides.
   `ponytail: fixed thread count; autotune+cache only if measured to matter.`
-- Multi-hop retrieval, conversation history, TUI, tool-call loop — no measurement
-  demands them yet.
+- **Multi-hop retrieval, tool-call loop, streaming** — no measurement demands them. Streaming
+  in particular buys ~nothing here: prefill is 85-90 % of an answer and nothing can be shown
+  until it finishes, and the grounding rules need the whole answer before printing any of it
+  (F80).
+- **Conversation history and a TUI were on this list and are now built** — a five-turn rolling
+  window (F84) and the interface in P6. The measurement that moved them: three turns deep,
+  "how big should it be" could not resolve "it" without the first turn (F84), and a 20-90 s
+  answer in a line-based prompt leaves the screen frozen with no way to change your mind
+  (F96).

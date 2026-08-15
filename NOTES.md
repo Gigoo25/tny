@@ -11,47 +11,57 @@ Portable: any computer, CPU-only, no GPU assumed.
 
 ## Status
 
-Sessions 1–2 (2026-08-13). Model choice, retrieval architecture, and corpus plan
-are settled **by measurement**. No Rust written yet — deliberately; the
-measurements redirected the design five times.
+Sessions 1–9 (2026-08-13 → 2026-08-15). **Built and measured**: 4,266 lines of Rust, 16 unit
+tests, 107 findings. Current numbers, and what is weak, are in `README.md` → *Where it
+stands*; this file is the evidence, append-only, and it wins where the three documents
+disagree.
 
-- `NOTES.md` — findings, append-only (this file)
-- `PLAN.md` — build sequence
-- `bench/harness.mjs` — runnable measurement harness (rebuilds every benchmark)
+- `NOTES.md` — findings, append-only (this file). F1–F107.
+- `PLAN.md` — design, phases and non-goals. All phases shipped except P5 (cut, F41).
+- `bench/*-cli.mjs` — the guards that run against the shipped binary; each pins its own
+  configuration (F105). `bench/harness.mjs` is the pre-Rust harness, kept for the
+  experiments the findings cite.
 
 ## Where to pick up
 
-1. Read "Verdict" below, then `PLAN.md` phase P0.
-2. Start the three servers (see "Environment"), then `bun bench/harness.mjs all`
-   to reproduce the numbers before changing anything.
-3. First code: `PLAN.md` P0 (supervise the servers) — nothing else is blocked.
-
-Open decisions worth resolving before/while coding are in "Open questions".
+1. `cargo test` (16 cases, no servers, no network) — the grounding rules.
+2. `nix-shell -p llama-cpp kiwix-tools --run 'bun bench/ctx-cli.mjs'` → `48/58`, and
+   `bun bench/rank-cli.mjs` → `article@1 34/58 · in shortlist 48/58`. Reproduce before
+   changing anything.
+3. The open work is **selection, not the model**: F79 measured that in 43 of 58 cases the
+   answer is one sentence already sitting in the retrieved text, and nothing tried —
+   lexical, bi-encoder, two cross-encoders — picks it better than the 0.8B does. That is
+   where the remaining 7 of 18 live. See "Exploration backlog — accuracy".
 
 ---
 
 ## The one-paragraph summary
 
 Retrieval, not model size, produces correct answers — but it cannot substitute for
-capability. On the same six terminal questions with the answer verified present in
-context, LFM2.5-350M scored 2/6 while Qwen3.5-0.8B scored 5/6; without any corpus
-they scored 1/6 and 3/6. So **350M with the entire corpus still loses to 0.8B with
-none of it**: retrieval multiplies whatever capability exists. Selection, however,
-must never be done by the chat model — asking it to choose among candidates scored
-*worse than free Xapian rank-1*, while a 35 MB embedding model fused with Xapian by
-Reciprocal Rank Fusion scored 9/10. Final shape: Xapian + bge-small select, and
-Qwen3.5-0.8B (thinking disabled) adapts.
+capability. On six terminal questions with the answer verified present in context,
+LFM2.5-350M scored 2/6 while Qwen3.5-0.8B scored 5/6; with no corpus at all, 1/6 and 3/6. So
+**350M with the entire corpus still loses to 0.8B with none of it**: retrieval multiplies
+whatever capability exists. Selection must never be done by the chat model — asking it to
+choose among candidates scored *worse than free Xapian rank-1* (F16). Embeddings were in the
+design for six sessions and then removed: measured against the 58-case fixture, a bi-encoder
+scored 21/58 and two cross-encoders 17–19/58, all worse than one line of lexical scoring and
+far worse than the model reading three articles at 42/58 (F79). Final shape: **Xapian
+full-text search plus lexical ranking select; Qwen3.5-0.8B (thinking disabled) adapts; a
+regex grounding check refuses anything it made up.**
 
 ## Verdict
 
 | Role | Choice | Size | Evidence |
 |---|---|---|---|
-| Answering | **Qwen3.5-0.8B Q8_0, `enable_thinking:false`** | ~0.9 GB | F20, F21, F23 |
-| Selecting + section ranking | **bge-small-en-v1.5 Q8_0** | ~35 MB | F17, F22 |
-| Knowledge | **ZIM files via `kiwix-serve`** | 82 MB → 18 GB tiers | F11–F14 |
-| Rejected as answerer | LFM2.5-350M | — | 2/6 with perfect context (F20/F23) |
-| Rejected outright | LFM2.5-1.2B-Thinking | — | never answered at all (F1) |
+| Answering | **Qwen3.5-0.8B Q8_0, `enable_thinking:false`** | ~0.9 GB | F20, F21, F23, F90, F107 |
+| Selecting + section ranking | **lexical scoring, no model** | 0 | F31, F58, **F79** |
+| Knowledge | **ZIM files via `kiwix-serve`** | 82 MB → 18 GB tiers | F11–F14, F87 |
+| Refusing | **regex grounding check** | 0 | F27, F44, F45 |
+| Rejected as answerer | LFM2.5-350M · Qwen3.5-350M · 230M | — | 2/6 with perfect context (F20/F23); 2× the wrong answers (F81) |
+| Rejected as answerer | Qwen3.5-2B, Qwen3.5-4B | — | 2B no better at 2.2× cost (F90); 4B 3.7× slower, two fewer correct (F107) |
+| Rejected outright | LFM2.5-1.2B-Thinking | — | never stopped thinking, no answer (F1) |
 | Rejected mechanism | model-as-judge | — | worse than free rank-1 (F16) |
+| Rejected mechanism | embeddings — bi-encoder and two cross-encoders | — | 17–21/58 against lexical's 21 and the model's 42 (F79) |
 
 ---
 
@@ -93,15 +103,17 @@ nix-shell -p kiwix-tools   # kiwix-serve, kiwix-search, kiwix-manage
 export LLAMA_CACHE=$PWD/models
 ```
 
-The three servers used for every measurement:
+`tny` starts and supervises what it needs, so nothing below has to be run by hand any more —
+it is here because the findings up to F78 were measured against these processes, and F79
+removed the third one.
 
 ```sh
-# knowledge (port 8082)
-kiwix-serve --port 8082 --address 127.0.0.1 zim/*.zim
-# answering (port 8080)
+# knowledge (port 8082) — still used, started by tny
+kiwix-serve --port 8082 --address 127.0.0.1 $TNY/zim/*.zim
+# answering (port 8080) — still used, started by tny, model per --model
 llama-server -hf ggml-org/Qwen3.5-0.8B-GGUF:Q8_0 --no-mmproj -t 4 -c 8192 --jinja \
              --port 8080
-# selection (port 8084)
+# selection (port 8084) — REMOVED (F79). Only the embedding findings need it.
 llama-server -hf ggml-org/bge-small-en-v1.5-Q8_0-GGUF --embeddings --pooling cls \
              -c 512 -t 4 --port 8084
 ```

@@ -91,12 +91,44 @@ deterministic rules, all of which beat the model when measured. It only paraphra
 was handed, and a regex grounding check rejects any answer containing a flag, path or version
 that is not in the source text.
 
+## Where it stands
+
+4,266 lines of Rust, 36 commits, 107 findings. Every number below comes from `bench/`, and
+each guard pins its own configuration (F105) so a run is reproducible.
+
+| what it measures | command | current |
+|---|---|---|
+| grounding rules (no servers, no network) | `cargo test` | **16/16** |
+| is the right article retrieved | `bun bench/rank-cli.mjs` | rank-1 **34/58**, in shortlist **48/58** |
+| is the fact in the context handed to the model | `bun bench/ctx-cli.mjs` | **48/58** |
+| is the answer right, end to end | `bun bench/answer-cli.mjs inst` | **11/18** correct, 2 refused, 5 wrong |
+| questions nobody here wrote | `bun bench/holdout-cli.mjs` | title **55/57**, body **54/57**, ref **18/18** |
+
+Corpus behind those numbers: 18 ZIMs, 5.5 GB — Wikipedia, Stack Exchange, Arch Wiki, DevDocs,
+man pages. Hardware: 4-core 2015 laptop, no GPU, 8 GB RAM.
+
+### What is honestly weak
+
+- **It is slow.** 39 s for a default answer here, 85-90 % of it prefill. `--ultrafast`
+  (0.3 s, no model) exists because sometimes the passage is all you wanted.
+- **Refusals are common.** 2 of the 18 above, and nearer a quarter across the full 58. A
+  refusal is the *designed* failure — the grounding check rejects any answer whose commands
+  or paths are not in the source — but it is still a non-answer.
+- **11/18 is the honest end-to-end number**, and the gap is mostly *selection*: in 43 of 58
+  cases the answer is already a single sentence in the retrieved text (F79), and no selector
+  tried — lexical, bi-encoder, two cross-encoders — picked it better than the model does.
+- **Bigger models do not fix it.** 4B: half the wrong answers, 3.7× the wall clock, two fewer
+  correct, does not fit in 8 GB (F107). 2B: no better (F90). 350M: twice as wrong (F81).
+- **A 58-case fixture cannot resolve small differences**, and it was authored here against
+  this corpus. `holdout-cli` counters that with 93 questions taken from the pages themselves,
+  which nothing was tuned against.
+
 ## The measurements
 
-- **`NOTES.md`** — 104 findings, each with the numbers behind it. Read this first.
-- **`PLAN.md`** — the build sequence. Every decision cites a finding.
-- **`bench/`** — the harnesses. `bun bench/harness.mjs ground` is a pure self-test: 23 cases
-  pinning the grounding rules, no servers, no network.
+- **`NOTES.md`** — 107 findings, each with the numbers behind it. Read this first; where the
+  three documents disagree, it wins.
+- **`PLAN.md`** — the design and the reasoning. Every decision cites a finding.
+- **`bench/`** — the guards in the table above, plus `harness.mjs` for the pre-Rust work.
 
 Headlines:
 
@@ -106,5 +138,7 @@ Headlines:
 - **Grounding is a regex, not a bigger model.** It buys 2B's entire measured advantage.
 - **More context is not more accuracy.** A wider window around a flag pulls in the
   *neighbouring* flag and the model reports its meaning instead (F100).
+- **The model must never select.** Ranking, query building and section choice are all done
+  better by deterministic rules; every arm that let the model choose scored worse (F16, F79).
 - **Retrieval is 2 % of the wall clock.** Prefill is 85-90 % of it, which is why the speed
   dial is a context-size dial.
