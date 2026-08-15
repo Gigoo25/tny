@@ -115,6 +115,88 @@ const VARIANTS = {
     const i = bestIndex(sents, q, (s, t) => cover(s, t) / Math.sqrt(s.length));
     return i <= 0 ? (sents[0] ?? "not found") : `${sents[0]} ${sents[i]}`;
   },
+
+  // A bi-encoder scores the question and each sentence separately and compares vectors. It
+  // is the cheapest model that can see past vocabulary — the lexical arms' failure is that
+  // an answer sentence rarely repeats the question's words.
+  embed: async (ctx, q) => {
+    const sents = sentences(ctx);
+    if (!sents.length) return "not found";
+    // bge-small is asymmetric: queries carry an instruction prefix, passages do not.
+    const [qv, ...svs] = await embed([`Represent this sentence for searching relevant passages: ${q}`, ...sents]);
+    let bi = 0, bs = -Infinity;
+    for (const [i, v] of svs.entries()) {
+      const s = cos(qv, v);
+      if (s > bs) { bs = s; bi = i; }
+    }
+    return sents[bi];
+  },
+
+  // A cross-encoder reads the question and the sentence together and scores the pair. This is
+  // the shape the task actually has — "does this sentence answer this question" — and it is
+  // what a purpose-built 33M reranker is trained to do, against a 0.8B general model doing it
+  // as a side effect of generating prose.
+  rerank: async (ctx, q) => {
+    const sents = sentences(ctx);
+    if (!sents.length) return "not found";
+    const scores = await rerank(q, sents);
+    let bi = 0, bs = -Infinity;
+    for (const [i, s] of scores.entries()) {
+      if (s > bs) { bs = s; bi = i; }
+    }
+    return sents[bi];
+  },
+};
+
+// Both servers are llama.cpp. Embeddings are cached on disk because a sweep re-scores the
+// same sentences repeatedly and each pass would otherwise cost a full CPU embed of the corpus.
+const EMBED = process.env.TNY_EMBED ?? "http://127.0.0.1:8084";
+const RERANK = process.env.TNY_RERANK ?? "http://127.0.0.1:8085";
+const EV = "bench/.embeds.json";
+const evCache = await Bun.file(EV).exists() ? JSON.parse(await Bun.file(EV).text()) : {};
+let evDirty = false;
+
+async function embed(texts) {
+  const miss = [...new Set(texts.filter(t => !evCache[t]))];
+  // Batching buys nothing — llama.cpp bills per token, and a batch of 8 costs 8x one — but
+  // the server has four slots, so four requests in flight is a straight 4x. Measured: 77 ms
+  // per sentence serial, 23 sentences per question.
+  const post = async (batch) => {
+    const r = await fetch(`${EMBED}/v1/embeddings`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ input: batch.map(t => t.slice(0, 1200)) }),
+    });
+    const j = await r.json();
+    if (!j.data) throw new Error(`embed failed: ${JSON.stringify(j).slice(0, 200)}`);
+    for (const [k, d] of j.data.entries()) evCache[batch[k]] = d.embedding;
+    evDirty = true;
+  };
+  const batches = [];
+  for (let i = 0; i < miss.length; i += 4) batches.push(miss.slice(i, i + 4));
+  for (let i = 0; i < batches.length; i += 4) {
+    await Promise.all(batches.slice(i, i + 4).map(post));
+  }
+  return texts.map(t => evCache[t]);
+}
+
+async function rerank(query, docs) {
+  const r = await fetch(`${RERANK}/v1/rerank`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ query, documents: docs.map(d => d.slice(0, 1200)), top_n: docs.length }),
+  });
+  const j = await r.json();
+  if (!j.results) throw new Error(`rerank failed: ${JSON.stringify(j).slice(0, 200)}`);
+  const out = new Array(docs.length).fill(-Infinity);
+  for (const x of j.results) out[x.index] = x.relevance_score;
+  return out;
+}
+
+const cos = (a, b) => {
+  let d = 0, na = 0, nb = 0;
+  for (let i = 0; i < a.length; i++) { d += a[i] * b[i]; na += a[i] * a[i]; nb += b[i] * b[i]; }
+  return d / (Math.sqrt(na) * Math.sqrt(nb) || 1);
 };
 
 const cover = (s, ts) => {
@@ -144,17 +226,38 @@ for (const [, query] of CASES) await contextOf(query);
 await Bun.write(CACHE, JSON.stringify(cache, null, 1));
 const fetched = ((Date.now() - t0) / 1000).toFixed(0);
 
-for (const name of sweep ? Object.keys(VARIANTS) : ["idf"]) {
+// Named arms run only when asked: the model-backed ones need their server up.
+const pick = process.argv.slice(2).filter(a => !a.startsWith("-"));
+const arms = pick.length ? pick : sweep ? Object.keys(VARIANTS) : ["leadbest"];
+for (const name of arms.filter(a => a !== "oracle")) {
+  if (!VARIANTS[name]) throw new Error(`no such arm: ${name} (have: ${Object.keys(VARIANTS).join(", ")}, oracle)`);
   const tally = tallyOf();
   for (const [set, query, , , , needleRe, expectRe] of CASES) {
     const t = Date.now();
-    const ans = VARIANTS[name](cache[query] ?? "", query);
+    const ans = await VARIANTS[name](cache[query] ?? "", query);
     const verdict = verdictOf(ans, "", needleRe, expectRe);
     tally.add(set, verdict, Date.now() - t);
-    if (show && !sweep) {
+    if (show) {
       console.log(`${verdict.padEnd(8)} ${set} ${query.slice(0, 44).padEnd(46)} ${ans.replace(/\s+/g, " ").slice(0, 76)}`);
     }
   }
   tally.report(name.padEnd(8));
+  if (evDirty) await Bun.write(EV, JSON.stringify(evCache));
 }
-console.log(`\n(contexts: ${Object.keys(cache).length} cached, ${fetched}s this run — selection itself is sub-millisecond)`);
+
+// The ceiling for extraction, not a shippable arm: grade *every* sentence and every adjacent
+// pair, and count the case correct if any of them passes. No selector can beat this, so it
+// separates "our selection is weak" from "the answer is not a sentence in the text at all".
+if (arms.includes("oracle")) {
+  const tally = tallyOf();
+  for (const [set, query, , , , needleRe, expectRe] of CASES) {
+    const t = Date.now();
+    const sents = sentences(cache[query] ?? "");
+    const spans = [...sents, ...sents.slice(0, -1).map((s, i) => `${s} ${sents[i + 1]}`)];
+    const hit = spans.find(s => verdictOf(s, "", needleRe, expectRe) === "ok");
+    tally.add(set, hit ? "ok" : "WRONG", Date.now() - t);
+    if (show && !hit) console.log(`MISS     ${set} ${query.slice(0, 46)}`);
+  }
+  tally.report("oracle  ");
+}
+console.log(`\n(contexts: ${Object.keys(cache).length} cached, ${fetched}s fetching this run)`);

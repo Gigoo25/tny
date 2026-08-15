@@ -12,3 +12,4 @@ bench/.sweep-cache.json
 # Retrieved contexts for the no-model arm — regenerable with
 # `bun bench/extract-cli.mjs --rebuild` (~50 s), and it carries scraped page text
 bench/.contexts.json
+bench/.embeds.json

@@ -2084,6 +2084,61 @@ one number: 21/58 to beat, 42/58 to match.
   because it ranked first — the answer came from the other two. Cheap fix: cite an article
   only when its text overlaps the answer.
 
+## F79 — relevance is not answerhood, and that is why the model earns its 20 s
+
+F76 asked what the 0.8B is buying. This measures the alternatives, all on the same 58 cases,
+all handed the identical context (`tny --context`, cached), all graded by `bench/grade.mjs`.
+
+```
+arm                                        correct   per answer
+oracle    best sentence or pair that exists  43/58    0 ms      (ceiling, not shippable)
+model     0.8B Q8_0, generate               42/58    20-40 s
+leadbest  lead + best lexical match          21/58    <1 ms
+embed     bge-small 33M bi-encoder, cosine   21/58    2.3 s
+rerank    bge-reranker-base 278M cross-enc   19/58    6.5 s
+lead      first real sentence                18/58    <1 ms
+rerank    jina-reranker-v1-tiny 33M          17/58    1.0 s
+window    best sentence + the next           10/58    <1 ms
+overlap   most query terms, length-norm       9/58    <1 ms
+idf       rarity-weighted overlap             9/58    <1 ms
+section   the whole best section              7/58    <1 ms
+```
+
+**The oracle is the finding.** In 43 of 58 cases a single sentence — or two adjacent ones —
+already passes the grader untouched. The model reaches 42. So generation is not synthesising
+something the text lacks: it is *selecting*, and it selects almost perfectly. Extraction is
+not structurally insufficient; every selector I tried is just bad at it.
+
+**And more model does not fix it.** A purpose-built cross-encoder is the right *shape* for
+"does this sentence answer this question", and it lost to one line of lexical scoring — twice,
+at 33M and at 278M, the larger one slower than the answer it replaces is worth. Scaling the
+reranker 8x moved 17 → 19 against 21 for `leadbest`. That is not a tuning gap.
+
+The reason is visible in the failures: rankers score *relevance*, and the answer sentence is
+usually the least relevant-looking one on the page. "How many moons does Jupiter have" —
+every sentence in the article is about Jupiter and moons; the one that says "115" says little
+else. Query-term density, cosine similarity and cross-encoder relevance all rank the
+discussion above the fact. The generator wins because reading for an answer is a different
+operation from ranking for similarity, and only one of the two is what the task needs.
+
+What this closes:
+
+- **No model at all** — 21/58. Costs 21 correct answers to save 20 s.
+- **An embedder instead of the model** — 21/58, and now 2.3 s instead of free.
+- **A bigger reranker** — 19/58 at 6.5 s. Measured, not assumed.
+
+What it leaves, both of which keep generation and attack its cost instead:
+
+1. **A smaller generator.** 350M and 230M are already on disk and answered correctly in 10 s
+   in the F-series probes. The arm is a one-line model swap against the same 58 cases.
+2. **Less input.** Prefill is 19–22 s of the 20–40 s, and F41 measured that a bigger window
+   buys no accuracy. Sweep `TOP_SECTIONS`/`PER_SECTION` for the point where accuracy breaks.
+
+A third, only if the first two disappoint: an extractive **QA** head (SQuAD-tuned, 22–66M),
+which is trained for answerhood rather than relevance. llama.cpp cannot serve one — it has no
+span-classification head — so it would cost a second runtime, and F79 says nothing about
+whether it would work. It is the one untested shape.
+
 ## Exploration backlog — speed
 
 The cost model, measured (0.8B Q8_0, 4 threads, this CPU):
