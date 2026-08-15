@@ -1978,6 +1978,73 @@ the question's inferred intent keeps 45/58 and is what ships.
 fixture proxy is unmoved at 45/58 and the graders are corrected, but no clean generation run
 has scored it. The last full run scored the *pre-gate* build at 42/58 after regrading.
 
+## F76 — measured latency, and the case that the model is the wrong tool
+
+Wall-clock, warm daemons, this CPU (4 threads, 0.8B Q8_0), from `tny -v`:
+
+```
+question                                   search   fetch   generate   wall
+"how do I create a swap file"              3179ms    82ms    38693ms   62.4s
+"why is the sky blue"                      2204ms    35ms    36177ms   56.7s
+"how do I undo the last commit …"          2627ms   208ms    12387ms  121.9s
+"why is the sky blue" (later, quiet box)      —       —          —     10.7s
+```
+
+Two things stand out and neither is retrieval.
+
+**Generation is 60–95 % of the wall clock**, and most of it is *reading*, not writing. Prefill
+measures 40.55 t/s here, so the ~3 KB of context (`TOP_SECTIONS` 5 × `PER_SECTION` 600) is
+roughly 750–900 tokens, or **19–22 s before the first output token exists**. Every 100 tokens
+of context costs 2.5 s. F41 already measured that a bigger window does not buy accuracy —
+which makes context size a pure latency knob that has never been swept against the clock.
+
+**The totals exceed the sum of the stages**, badly in one case (12 s of stages, 122 s of wall).
+Unaccounted: process start, `llama-server` re-prefill of the system prompt, the three
+grounding passes over full article text, and — the likely bulk — swap, since this box was at
+264 MB free with 4.5 GB of ZIMs mmapped. Attribution needs a stage timer around everything,
+not just the three we print.
+
+### Is a 0.8B general model the right tool for this at all?
+
+What the model is actually asked to do: read ~3 KB of retrieved text and emit one sentence
+that repeats the fact it contains. It is not reasoning, not composing, not using knowledge —
+F27/F44/F45 exist specifically to *reject* anything it says that the text does not support,
+and 350M/230M models already refuse "not found" correctly. This is extraction plus phrasing,
+and it is being served by a general instruct model at 25 ms per input token.
+
+Candidates, cheapest first, each with the test that would kill it:
+
+1. **No model at all.** Print the best-scoring *sentence* from the picked sections — the same
+   `lex_score` already used to pick the sections, one level finer. Costs microseconds. **Run
+   this first**: it is the control experiment that should have existed from the beginning, and
+   until it is scored on the 58 cases nobody knows what the 20–40 s is buying. If it scores
+   30/58 against the model's 42/58, the model is worth 12 cases; if it scores 40/58, it is not.
+2. **Extractive QA** — a SQuAD-tuned encoder (MiniLM/DistilBERT, 22–66M) returns an answer
+   *span*, not prose, in ~100–300 ms on CPU. Kills the generation stage outright. Costs an
+   ONNX or candle runtime and gives up fluency; the span still needs templating.
+3. **Small seq2seq** (flan-t5-small, 80M) to phrase a span into a sentence — generation, but
+   of ~20 tokens from ~60, not 900.
+4. **Keep the 0.8B but shrink its input.** Sweep `TOP_SECTIONS`/`PER_SECTION` against accuracy
+   *and* latency; F41 suggests the accuracy cost is near zero and the latency saving is linear.
+5. **Route by difficulty** — sentence extraction for the easy majority, the model only when
+   extraction is unconfident. Only worth building after 1 and 2 are measured separately.
+
+The honest framing: a 0.8B model that spends 20 s reading in order to rewrite one sentence it
+was handed is doing a 100 ms job. The question is not whether something smaller works, but how
+many of the 58 cases the big one is actually winning.
+
+### Speed levers that are independent of the model
+
+- **Parallelise the per-book search.** 16 books are queried in series and it measures 2.2–3.2 s.
+  Bounded at four threads (F72: kiwix-serve segfaults under more), this should be ~0.5 s.
+- **Reuse the prompt cache.** The system prompt is static and re-prefilled every turn;
+  llama.cpp's `--cache-reuse` exists for exactly this.
+- **Q4_K_M instead of Q8_0.** Halves the bandwidth prefill is bound by. Measure the accuracy
+  delta on the 58 cases before believing it is free.
+- **Cite only what contributed.** "why is the sky blue" cites `Sky Blue Sky`, a Wilco album,
+  because it ranked first — the answer came from the other two. Cheap fix: cite an article
+  only when its text overlaps the answer.
+
 ## Exploration backlog — speed
 
 The cost model, measured (0.8B Q8_0, 4 threads, this CPU):
