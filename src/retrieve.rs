@@ -455,6 +455,45 @@ pub fn rank_articles(q: &str, cands: &[Candidate]) -> Vec<Candidate> {
     scored.into_iter().map(|(_, c)| c.clone()).collect()
 }
 
+/// F91: reciprocal rank fusion, as the alternative to adding two signals with a hand-tuned
+/// weight. The lexical score and Xapian's own within-book order are two rankings of the same
+/// candidates; RRF merges them by *position* rather than magnitude, which is the standard fix
+/// for scores that are not comparable across sources — and this pipeline searches eighteen
+/// books whose scores were never calibrated against each other.
+///
+/// `k = 60` is the constant from the original TREC work; it damps the top of each list so a
+/// single ranking cannot carry a candidate on its own.
+pub fn rank_articles_rrf(q: &str, cands: &[Candidate]) -> Vec<Candidate> {
+    const K: f64 = 60.0;
+    let t = terms(q);
+    let intent = infer_intent(q);
+    // Ranking one: the lexical score, without the rank penalty — that signal enters as its
+    // own list below rather than as a subtraction.
+    let mut lex: Vec<(f64, usize)> = cands
+        .iter()
+        .enumerate()
+        .map(|(i, c)| (title_body_score(c, &t) + kind_prior(intent, c.kind) + title_covered(c, &t) * 3.0, i))
+        .collect();
+    lex.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+    let mut lex_rank = vec![0usize; cands.len()];
+    for (pos, (_, i)) in lex.iter().enumerate() {
+        lex_rank[*i] = pos;
+    }
+    // Ranking two: the engine's order. Every book returns its own list, so a book's first hit
+    // and another book's first hit contribute equally — which is precisely the flooding this
+    // is meant to answer, where one book's six keyword-dense titles took every slot.
+    let mut fused: Vec<(f64, &Candidate)> = cands
+        .iter()
+        .enumerate()
+        .map(|(i, c)| {
+            let s = 1.0 / (K + lex_rank[i] as f64) + 1.0 / (K + c.rank as f64);
+            (s, c)
+        })
+        .collect();
+    fused.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+    fused.into_iter().map(|(_, c)| c.clone()).collect()
+}
+
 pub fn urlencode(s: &str) -> String {
     let mut out = String::with_capacity(s.len() + 8);
     for b in s.bytes() {

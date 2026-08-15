@@ -1,234 +1,234 @@
 {
  "what is a kernel in corn": {
-  "ans": "A kernel in corn is the dry seed enclosed within the pericarp and testa, which fuse to form the caryopsis.",
-  "err": "biology.stackexchange.com_en_all_2026-02 · Are corn kernels considered a grain · §(lead), §1 Answers 1, §(lead), §Boil the corn, §(lead), §4 Answers 4 (18.0s)\n"
+  "ans": "A kernel in corn is a dry, indehiscent fruit that contains one seed enclosed within a hard coat called the testa, surrounded by layers of tissue known as the pericarp.",
+  "err": "\n\u001b[2m  1 biology.stackexchange · Are corn kernels considered a grain   32.3s\u001b[0m\n"
  },
  "what is a shell in biology": {
   "ans": "The turtle shell is made up of numerous bony elements, generally named after similar bones in other vertebrates, and a series of keratinous scutes which are also uniquely named.",
-  "err": "wikipedia_en_top_nopic_2026-06 · Turtle shell · §Shell nomenclature, §Triassic: evolution of complete shell, §(lead), §Accessibility, §(lead), §Synthesis (15.2s)\n"
+  "err": "\n\u001b[2m  1 Wikipedia · Turtle shell   26.1s\u001b[0m\n"
  },
  "what is a cookie made of": {
-  "ans": "Zombie cookies are created by web servers storing user data on devices, whereas the dough of a standard chocolate chip cookie consists primarily of butter, sugar, and flour.",
-  "err": "wikipedia_en_computer_nopic_2026-06 · Zombie cookie · §Controversies, §(lead), §(lead), §3 Answers 3, §(lead), §1 Answers 1 (13.1s)\n"
+  "ans": "Based on the provided text, a zombie cookie is a piece of data created by a web server and placed on a user's device to track browsing activity, similar to regular cookies but designed to prevent deletion. The text does not provide specific ingredients for making a standard cookie.",
+  "err": "\n\u001b[2m  1 Wikipedia · Zombie cookie   28.6s\u001b[0m\n"
  },
  "how do python snakes kill their prey": {
-  "ans": "The reticulated python is an ambush predator that waits until prey enters its strike range before seizing it in coils and killing by constriction. The Burmese python is a sit-and-wait predator that grabs prey with sharp teeth, wraps its body around the animal to kill it through constriction, and then swallows the prey whole.",
-  "err": "wikipedia_en_top_nopic_2026-06 · Reticulated python · §Danger to humans, §Diet, §As an invasive species, §Diet, §1 Answers 1, §(lead) (24.3s)\n"
+  "ans": "The reticulated python is an ambush predator that waits until prey enters its strike range before seizing it in its coils and killing by constriction.",
+  "err": "\n\u001b[2m  1 Wikipedia · Reticulated python   25.5s\u001b[0m\n"
  },
  "how does the brain consolidate long term memory": {
-  "ans": "The hippocampus is essential for consolidating new information into long-term memory, and this process relies on stable neural connections that persist throughout life.",
-  "err": "wikipedia_en_top_nopic_2026-06 · Memory · §Long-term memory, §(lead), §3 Answers 3, §(lead), §Long-term spatial memory, §Short-term spatial memory (13.0s)\n"
+  "ans": "The hippocampus is essential for consolidating new information into long-term memory, and this process relies on stable neural connections that are maintained by more permanent changes in brain structure.",
+  "err": "\n\u001b[2m  1 Wikipedia · Memory   25.8s\u001b[0m\n"
  },
  "what is a kernel in an operating system": {
   "ans": "A kernel is a component of a computer operating system that serves as an intermediary connecting software to hardware, enabling them to work together seamlessly.",
-  "err": "wikipedia_en_computer_nopic_2026-06 · Kernel (operating system) · §Early operating system kernels, §System calls, §Early operating system kernels, §System calls, §(lead), §Comparison criteria (12.7s)\n"
+  "err": "\n\u001b[2m  1 Wikipedia · Comparison of operating system kernels   22.4s\u001b[0m\n"
  },
  "what is a shell in computing": {
   "ans": "A shell in computing is an operating system shell that provides relatively broad and direct access to the system on which it runs.",
-  "err": "wikipedia_en_computer_nopic_2026-06 · Shell (computing) · §Command-line shells, §(lead), §Command-line shells, §(lead), §(lead), §Definition (11.7s)\n"
+  "err": "\n\u001b[2m  1 Wikipedia · Shell (computing)\n  2 Wikipedia · Shell (computing)   22.6s\u001b[0m\n"
  },
  "what is an http cookie used for": {
   "ans": "An HTTP cookie is a small block of data created by a web server while a user is browsing a website and placed on the user's computer or other device by the user's web browser.",
-  "err": "wikipedia_en_computer_nopic_2026-06 · HTTP cookie · §(lead), §Setting a cookie, §(lead), §Setting a cookie, §CookieJar and FileCookieJar Objects, §(lead) (14.7s)\n"
+  "err": "\n\u001b[2m  1 Wikipedia · HTTP cookie\n  2 Wikipedia · HTTP cookie   26.0s\u001b[0m\n"
  },
  "what is python the programming language": {
-  "ans": "Python is a high-level, general-purpose programming language that emphasizes code readability and simplicity, with significant indentation as a key feature. It supports multiple programming paradigms including object-oriented, procedural (imperative), functional, structured, reflective, design by contract, and logic programming, while being primarily known for its dynamic typing and garbage collection.",
-  "err": "wikipedia_en_computer_nopic_2026-06 · Python (programming language) · §(lead), §Design philosophy and features, §(lead), §Design philosophy and features, §(lead), §Alternative implementations (25.8s)\n"
+  "ans": "Python is a high-level, general-purpose programming language that emphasizes code readability and simplicity, with features like garbage collection and dynamic typing.",
+  "err": "\n\u001b[2m  1 Wikipedia · Python (programming language)\n  2 Wikipedia · Python (programming language)\n  3 Arch Wiki · Python   23.6s\u001b[0m\n"
  },
  "what is virtual memory in a computer": {
-  "ans": "Virtual memory is a system that allows a computer to use more physical memory than its main RAM, by dividing it into segments and storing data in auxiliary storage like hard drives or SSDs.",
-  "err": "wikipedia_en_computer_nopic_2026-06 · Virtual memory · §Segmented virtual memory, §History, §Segmented virtual memory, §History, §Origins, §(lead) (19.5s)\n"
+  "ans": "Virtual memory allows a computer to extend its physical main memory beyond its capacity by using a system of pages and segments to store data, enabling programs to run even when their code exceeds available RAM.",
+  "err": "\n\u001b[2m  1 Wikipedia · Virtual memory\n  2 Wikipedia · Virtual memory   28.3s\u001b[0m\n"
  },
  "how do I change the hostname of my machine": {
-  "ans": "To change the hostname, edit `/etc/hostname` to include your desired name or use `hostnamectl` to set it temporarily.",
-  "err": "archlinux_en_all_maxi_2026-07 · Network configuration · §Set the hostname, §Local network hostname resolution, §Some example headers, §(lead), §Variables, §Files (22.7s)\n"
+  "ans": "You can change the hostname using the `hostname` command with an argument, or by editing `/etc/hostname` and running `hostnamectl`.",
+  "err": "\n\u001b[2m  1 devdocs man · hostname (5)\n  2 devdocs man · hostnamectl (1)\n  3 devdocs man · machine-info (5)   55.4s\u001b[0m\n"
  },
  "how do I enable a systemd service so it starts at boot": {
-  "ans": "To enable a systemd service so it starts at boot, you must use the `--now` switch in conjunction with the `enable` command to start or stop the unit immediately rather than after rebooting.",
-  "err": "archlinux_en_all_maxi_2026-07 · Systemd · §Using units, §Running services after the network is up, §(lead), §History, §(lead), §History (28.1s)\n"
+  "ans": "To enable a systemd service so it starts at boot, you must use the `--now` switch in conjunction with the `enable` command.",
+  "err": "\n\u001b[2m  1 Arch Wiki · Systemd   64.3s\u001b[0m\n"
  },
  "how do I add a new user with useradd": {
-  "ans": "To add a new user using the `useradd` command, you must specify the `-d` option to define the home directory path and provide the username, group, and shell options. For example, `useradd -m -d /home/alice -c \"ALICE ADMIN\" -s /usr/bin/bash alice`.",
-  "err": "archlinux_en_all_maxi_2026-07 · Users and groups · §User management, §Example adding a user, §(lead), §1 Answers 1, §Enable support to build unprivileged containers, §(lead) (26.7s)\n"
+  "ans": "useradd creates a new user account using the specified options, which include specifying the home directory via -d or appending the LOGIN name to BASE_DIR if not provided.",
+  "err": "\n\u001b[2m  1 devdocs man · useradd (8)\n  2 devdocs man · usermod (8)\n  3 devdocs man · groupadd (8)   65.7s\u001b[0m\n"
  },
  "how do I resize an ext4 filesystem": {
-  "ans": "Resize2fs can resize ext4 file systems by specifying the desired size or defaulting to the current partition size; ensure the filesystem is unmounted and e2fsck is run first before resizing.",
-  "err": "archlinux_en_all_maxi_2026-07 · Ext4 · §Resize filesystem, §Enabling metadata checksums in existing filesystems, §(lead), §Resizing partitions, §Shrinking partitions (22.3s)\n"
+  "ans": "Resize2fs can be used to enlarge or shrink an unmounted ext4 file system located on a device. To resize an ext4 filesystem to a specific size, specify the partition size parameter in the resize2fs command.",
+  "err": "\n\u001b[2m  1 Arch Wiki · Ext4\n  2 devdocs man · ext4 (5)   48.9s\u001b[0m\n"
  },
  "how do I mount a filesystem by UUID in fstab": {
-  "ans": "To mount a filesystem by UUID in fstab, you must specify the UUID value as the `UUID` field in the `options` line of your `/etc/fstab` entry. For example, if your filesystem has UUID `b411dc99-f0a0-4c87-9e05-184977be8539`, you would write: `UUID=b411dc99-f0a0-4c87-9e05-184977be8539 /home ext4`.",
-  "err": "archlinux_en_all_maxi_2026-07 · Fstab · §Usage, §Modifying user permissions and ownership, §(lead), §2 Answers 2, §Filesystems, §Versions 1 and 6 (date–time and MAC address) (58.2s)\n"
+  "ans": "You can mount a filesystem by UUID in fstab using the LABEL=<label> or UUID=<uuid> option, which allows you to specify the UUID directly instead of a device name.",
+  "err": "\n\u001b[2m  1 Arch Wiki · Fstab\n  2 devdocs man · mount (8)   49.4s\u001b[0m\n"
  },
  "how do I enable the en_US.UTF-8 locale": {
-  "ans": "To enable the `en_US.UTF-8` locale, uncomment the corresponding entry in `/etc/locale.gen` and run `locale-gen`.",
-  "err": "archlinux_en_all_maxi_2026-07 · Locale · §Generating locales, §Metric measurements with US locale, §23.1.4. Locale Providers, §23.1.3. Selecting Locales, §Element type declarations, §Entity declarations (21.4s)\n"
+  "ans": "To enable the en_US.UTF-8 locale, uncomment the corresponding entry in `/etc/locale.gen` and run `locale-gen`.",
+  "err": "\n\u001b[2m  1 Arch Wiki · Locale   40.9s\u001b[0m\n"
  },
  "how do I let a user run commands with sudo": {
-  "ans": "sudo allows a system administrator to delegate authority to give certain users—the ability to run commands as root or another user—while providing an audit trail of the commands and their arguments.",
-  "err": "archlinux_en_all_maxi_2026-07 · Sudo · §(lead), §Harden with sudo example, §Tools and similar programs, §(lead), §5.1.2. How to run a Python script, §5.1.1. Installation steps (17.8s)\n"
+  "ans": "To allow a user to run commands with sudo, you must create an entry in `/etc/sudoers.d/` that specifies the user's hostname and assigns them the `ALL` group privileges (e.g., `archie hostname = (ALL:ALL)`), which grants them full command execution rights without requiring a password.",
+  "err": "\n\u001b[2m  1 Arch Wiki · Sudo\n  2 devdocs man · sudoers (5)   52.4s\u001b[0m\n"
  },
  "how do I undo the last commit but keep my changes": {
-  "ans": "Use `git reset --hard HEAD~3` to remove the last three commits while keeping your working directory and index unchanged.",
-  "err": "devdocs_en_git_2026-07 · git reset · §Examples, §Description, §Post-war period, §Government and politics, §Recent changes patrolling, §Maintenance of listings of applications (15.5s)\n"
+  "ans": "Use `git reset --hard HEAD~3` to discard the last three commits while keeping your working directory unchanged.",
+  "err": "\n\u001b[2m  1 devdocs git · git reset\n  2 devdocs man · git-reset (1)   47.0s\u001b[0m\n"
  },
  "how do I change the message of my last commit": {
-  "ans": "To change the message of your last commit, run the following command in the terminal: git commit -m 'Your new commit message'.",
-  "err": "wikipedia_en_computer_nopic_2026-06 · Commit (version control) · §Git, §Mercurial (hg), §Options, §Examples, §Commit charge, §Commit limit (20.1s)\n"
+  "ans": "To change the message of your last commit, run `git commit -m 'new message'` after staging the files with `git add .`.",
+  "err": "\n\u001b[2m  1 Wikipedia · Commit (version control)\n  2 devdocs man · git-commit (1)\n  3 devdocs git · git commit   74.9s\u001b[0m\n"
  },
  "how do I create a docker image tag for a registry": {
-  "ans": "To create a docker image tag for a registry, you must use the `docker tag` command with the registry hostname and port specified (e.g., `docker tag <image> registry-host:5000/myname`).",
-  "err": "devdocs_en_docker_2026-07 · docker tag · §Tag an image for a private repository, §Description, §Image pulls from Docker Hub are rate limited, §Remove Docker and images, §Push all tags of an image, §Push a new image to a registry (20.5s)\n"
+  "ans": "To create a docker image tag, use the `docker tag` command with the registry hostname and port specified (e.g., `docker tag <image> registry-host:5000/myname`).",
+  "err": "\n\u001b[2m  1 devdocs docker · docker tag\n  2 devdocs docker · docker push   113.5s\u001b[0m\n"
  },
  "how do I add a login role with a password in postgresql": {
-  "ans": "To add a login role with a password in PostgreSQL, you must first create the role using the `CREATE ROLE` command, then grant it the necessary privileges (such as `LOGIN`) and set its password using the `ALTER ROLE` command.",
-  "err": "devdocs_en_postgresql_2026-08 · CREATE ROLE · §Parameters, §Warning, §Require password for login, §Configure PostgreSQL to be accessible from remote hosts, §Description, §Parameters (19.9s)\n"
+  "ans": "To add a login role with a password in PostgreSQL, you must first create the role using the `CREATE ROLE` command and then grant it the necessary privileges (such as `LOGIN`) by specifying the password via the `GRANT` command.",
+  "err": "\n\u001b[2m  1 devdocs postgresql · CREATE ROLE\n  2 Arch Wiki · PostgreSQL\n  3 devdocs postgresql · ALTER ROLE   53.1s\u001b[0m\n"
  },
  "how do I create a virtual environment in python": {
-  "ans": "You can create a virtual environment using the `python -m venv` command, which installs the Python interpreter from the specified directory.",
-  "err": "archlinux_en_all_maxi_2026-07 · Python/Virtual environment · §Python versions, §(lead), §Virtual environment, §Third-party packages, §12.2. Creating Virtual Environments, §12.1. Introduction (21.7s)\n"
+  "ans": "You can create a virtual environment using the `python -m venv` command, which installs Python and other tools into a specific directory.",
+  "err": "\n\u001b[2m  1 Arch Wiki · Python/Virtual environment\n  2 Arch Wiki · Python\n  3 devdocs python · 12. Virtual Environments and Packages   44.1s\u001b[0m\n"
  },
  "what does unwrap_or_default return on an Option": {
   "ans": "not found",
-  "err": "wikipedia_en_computer_nopic_2026-06 · Null coalescing operator · §Rust, §C#, §9.16.3. SQL/JSON Query Functions, §9.16.2.2. Strict and Lax Modes, §2 Answers 2, §(lead) (12.7s)\ntny: rejected — identifier not in reference: unwrap_or_default\n"
+  "err": "tny: rejected — identifier not in reference: unwrap_or_default\n"
  },
  "how does bash substitute a default value if a variable is unset": {
-  "ans": "Bash uses the colon command (: ${VAR:=default}) to assign a default value to an unset variable.",
-  "err": "unix.stackexchange.com_en_all_2026-02 · Bash function that assigns a default value to unset variables · §(lead), §1 Answers 1, §(lead), §2 Answers 2, §(lead) (9.9s)\n"
+  "ans": "Bash substitutes a default value by using parameter expansion with the colon operator (e.g., `${var:-\"default\"}`) or by setting the variable to an empty string when it is unset.",
+  "err": "\n\u001b[2m  1 devdocs man · bash (1)\n  2 devdocs bash · Bash Variables   30.4s\u001b[0m\n"
  },
  "what does the --oneline flag do in git log": {
-  "ans": "The `--oneline` flag disables tab expansion and formats the commit message as a single line, which can be useful for quick visual inspection of changes.",
-  "err": "devdocs_en_git_2026-07 · git log · §Commit Formatting, §Diff formatting, §Visual representation, §Using git-credential-netrc as credential-helper, §Commit Limiting, §Options (16.0s)\n"
+  "ans": "The `--oneline` flag disables tab expansion and formatting, resulting in a single-line representation of each commit message.",
+  "err": "\n\u001b[2m  1 devdocs git · git log\n  2 devdocs man · git-log (1)   27.1s\u001b[0m\n"
  },
  "what arguments does json.dumps take": {
-  "ans": "json.dumps takes a single argument `obj` and optional keyword arguments including `indent`, `sort_keys`, `check_circular`, `allow_nan`, `cls`, `default`, `separators`, `ensure_ascii`, and `skipkeys`.",
-  "err": "devdocs_en_python_2026-08 · json · §(lead), §Basic Usage, §4 Answers 4, §(lead), §Conventions for Public Functions and Macros, §Event-Specific Key/Value Pairs (23.1s)\n"
+  "ans": "json.dumps takes a dictionary or list as input and serializes it into a JSON string using the specified parameters, including optional arguments like indent, sort_keys, check_circular, allow_nan, and cls.",
+  "err": "\n\u001b[2m  1 devdocs python · json   30.5s\u001b[0m\n"
  },
  "what precision does the numeric data type have in postgresql": {
   "ans": "The reference material states that the precision of an arbitrary-precision numeric is the total count of significant digits in the whole number.",
-  "err": "devdocs_en_postgresql_2026-08 · Numeric Types · §8.1.2. Arbitrary Precision Numbers, §(lead), §Data types, §Database administration, §(lead), §Compatibility (13.4s)\n"
+  "err": "\n\u001b[2m  1 devdocs postgresql · Numeric Types\n  2 Wikipedia · PostgreSQL   29.7s\u001b[0m\n"
  },
  "what does the --rm option do in docker run": {
-  "ans": "The `--rm` option removes the container from the Docker daemon's memory pool after the command finishes executing, preventing resource leaks.",
-  "err": "devdocs_en_docker_2026-07 · docker run · §Add host device to container (--device), §Options, §With the --gpus option (recommended), §With NVIDIA container runtime, §Runtime privilege and Linux capabilities, §General form (10.8s)\n"
+  "ans": "The `--rm` option removes the container from the Docker daemon when the command is executed.",
+  "err": "\n\u001b[2m  1 devdocs docker · docker run\n  2 Arch Wiki · Docker\n  3 devdocs docker · Docker run reference   26.3s\u001b[0m\n"
  },
  "why does ./script.sh give permission denied but bash script.sh works": {
-  "ans": "The error occurs because the script file lacks executable permissions (chmod), while the shell script syntax is valid and the filesystem mount option allows execution without root privileges.",
-  "err": "unix.stackexchange.com_en_all_2026-02 · Run ./script.sh vs bash script.sh - permission denied · §Filesystem mounted with noexec option, §(lead), §1 Answers 1, §(lead), §(lead), §1 Answers 1 (18.4s)\n"
+  "ans": "bash script.sh is a standalone executable that bypasses the shell's default execution restrictions, whereas ./script.sh invokes the shell and requires the script to be executable.",
+  "err": "\n\u001b[2m  1 unix.stackexchange · Run ./script.sh vs bash script.sh - permission denied   27.9s\u001b[0m\n"
  },
  "ssh gives connection refused what does that mean": {
-  "ans": "Connection refused means the server is not listening on the specified port and cannot accept new connections.",
-  "err": "unix.stackexchange.com_en_all_2026-02 · ssh Connection refused: how to troubleshoot? · §5 Answers 5, §(lead), §(lead), §2 Answers 2, §(lead) (12.1s)\n"
+  "ans": "SSH Connection Refused means the server is not accepting connections, typically due to a firewall blocking the port or a misconfiguration in the server's configuration.",
+  "err": "\n\u001b[2m  1 unix.stackexchange · ssh Connection refused: how to troubleshoot?\n  2 unix.stackexchange · SSH Connection Refused In CentOS?\n  3 unix.stackexchange · what would cause SSH connection refused but not refuse an immediate subsequent attempt?   26.3s\u001b[0m\n"
  },
  "how do I find out which processes are preventing unmounting of a device": {
-  "ans": "not found",
-  "err": "unix.stackexchange.com_en_all_2026-02 · How do I find out which processes are preventing unmounting of a device? · §(lead), §8 Answers 8, §(lead), §1 Answers 1, §Reserved blocks, §External journal device (20.1s)\ntny: rejected — command not in reference: -rw-\n     the library has:\n       FretMap.app                        53 MB  tny --corpus add fretmap.app_en_all\n       Hundred Rabbits                   173 MB  tny --corpus add 100r.co_en_all\n       Politics Q&A                      209 MB  tny --corpus add politics.stackexchange.com_en_all\n"
+  "ans": "lsof | grep works better for finding processes using a mountpoint than fuser -mv.",
+  "err": "\n\u001b[2m  1 unix.stackexchange · How do I find out which processes are preventing unmounting of a device?   28.9s\u001b[0m\n"
  },
  "bash syntax error near unexpected token done": {
-  "ans": "The error indicates a syntax error in the Bash script caused by unexpected carriage return characters (CR) in the input file, which are being interpreted as part of the `done` token.",
-  "err": "unix.stackexchange.com_en_all_2026-02 · Bash : syntax error near unexpected token &apos; done &apos; · §(lead), §Linked, §(lead), §4 Answers 4, §(lead), §1 Answers 1 (15.0s)\n"
+  "ans": "The error indicates a missing trailing quote mark in the `done` command, which is likely caused by running the script through `dos2unix`.",
+  "err": "\n\u001b[2m  1 unix.stackexchange · bash pipeline: syntax error near unexpected token &apos;else&apos;\n  2 unix.stackexchange · &apos;while read line do&apos; cause: &quot;syntax error near unexpected token `done&apos;&quot; in Linux bash script   27.6s\u001b[0m\n"
  },
  "what does exit code 127 mean": {
-  "ans": "not found",
-  "err": "unix.stackexchange.com_en_all_2026-02 · service: Start request repeated too quickly. (code=exited, status=127) · §(lead), §Linked, §(lead), §4 Answers 4, §(lead) (22.0s)\ntny: rejected — command not in reference: EINTR\n     the library has:\n       CodeceptJS Docs                     1 MB  tny --corpus add devdocs_en_codeceptjs\n       Codeception Docs                    1 MB  tny --corpus add devdocs_en_codeception\n       CodeIgniter Docs                    1 MB  tny --corpus add devdocs_en_codeigniter\n"
+  "ans": "Exit code 127 typically indicates a shell command failed due to an error, often related to missing arguments or permission issues.",
+  "err": "\n\u001b[2m  1 unix.stackexchange · How do I get the list of exit codes (and/or return codes) and meaning for a command/utility?   33.5s\u001b[0m\n"
  },
  "ssh says host key verification failed what do I do": {
   "ans": "not found",
-  "err": "unix.stackexchange.com_en_all_2026-02 · &quot;Host key verification failed&quot; even with removed ~/.ssh/known_hosts · §(lead), §3 Answers 3, §(lead), §(lead), §1 Answers 1 (12.9s)\ntny: rejected — command not in reference: echo\n     the library has:\n       The Guide to Online Anonymity      28 MB  tny --corpus add anonymousplanet.org_en_all\n       Nicky Case                        607 MB  tny --corpus add ncase.me_en_all\n       Noted.lol                         2.4 GB  tny --corpus add noted.lol_en_all\n"
+  "err": "tny: rejected — command not in reference: echo\n     the library has:\n       The Guide to Online Anonymity      28 MB  tny --corpus add anonymousplanet.org_en_all\n       Nicky Case                        607 MB  tny --corpus add ncase.me_en_all\n       Noted.lol                         2.4 GB  tny --corpus add noted.lol_en_all\n"
  },
  "disk space not freed after deleting a large log file": {
-  "ans": "The reference material indicates that disk space is not freed up when deleting files on a hard drive, even if the file size is small; this behavior persists regardless of whether the deletion was accidental or intentional.",
-  "err": "unix.stackexchange.com_en_all_2026-02 · Disk space is not freed up when deleting files on a hard drive · §(lead), §3 Answers 3, §(lead), §1 Answers 1, §(lead), §1 Answers 1 (17.2s)\n"
+  "ans": "The reference material indicates that disk space is not freed up when deleting files on a hard drive, even if the file size is small.",
+  "err": "\n\u001b[2m  1 unix.stackexchange · Disk space is not freed up when deleting files on a hard drive\n  2 unix.stackexchange · After deleting &quot;database-wal&quot; file from kactivitymanagerd which suddently had a size of several GBs disk space is not freed up\n  3 unix.stackexchange · Disk full after deleting large files and rebooting   31.0s\u001b[0m\n"
  },
  "rm gives argument list too long": {
-  "ans": "The error occurs because the `find` command outputs a very long string of arguments that exceeds the shell's argument limit for the `rm` command. To resolve this, you should use a temporary file to store the output of `find`, pipe it through a loop or redirection, and then execute the `rm` command on that temporary file instead of passing the entire output directly to `rm`.",
-  "err": "unix.stackexchange.com_en_all_2026-02 · Delete files specified by the output of find: rm thinks argument list is too long. · §(lead), §2 Answers 2, §4 Answers 4, §(lead), §(lead), §5 Answers 5 (38.2s)\n"
+  "ans": "The error occurs because the `find` command outputs a very long string of arguments, exceeding the shell's limit for the `rm` command. To resolve this, you should use a temporary file to store the output of `find`, pipe it through a loop or redirection, and then execute `rm` on that file instead of passing the entire list directly to the shell.",
+  "err": "\n\u001b[2m  1 unix.stackexchange · Argument list too long error with makefile   45.7s\u001b[0m\n"
  },
  "no space left on device but there is plenty of free space": {
   "ans": "not found",
-  "err": "unix.stackexchange.com_en_all_2026-02 · No space left on device, with 320 GB free · §(lead), §Linked, §(lead), §4 Answers 4, §(lead), §1 Answers 1 (16.9s)\ntny: rejected — identifier not in reference: I/O\n     the library has:\n       Freelancing Q&A                    14 MB  tny --corpus add freelancing.stackexchange.com_en_all\n       Space Exploration Q&A             399 MB  tny --corpus add space.stackexchange.com_en_all\n       Algorithms                        517 MB  tny --corpus add jeffe.cs.illinois.edu_en_all\n"
+  "err": "tny: rejected — identifier not in reference: I/O\n     the library has:\n       Freelancing Q&A                    14 MB  tny --corpus add freelancing.stackexchange.com_en_all\n       Space Exploration Q&A             399 MB  tny --corpus add space.stackexchange.com_en_all\n       Algorithms                        517 MB  tny --corpus add jeffe.cs.illinois.edu_en_all\n"
  },
  "command not found even though the program is installed and in my path": {
-  "ans": "sh: 1: program not found",
-  "err": "unix.stackexchange.com_en_all_2026-02 · Why is program not found in PATH · §(lead), §1 Answers 1, §2 Answers 2, §(lead), §(lead) (6.4s)\n"
+  "ans": "The error indicates that while the program exists in your PATH, it is not recognized by the shell or interpreter executing the command.",
+  "err": "\n\u001b[2m  1 unix.stackexchange · Why is program not found in PATH\n  2 unix.stackexchange · sh: 1: program not found\n  3 unix.stackexchange · python install via asdf: scrapy package not found even though pip install says requirement is already satisfied   25.3s\u001b[0m\n"
  },
  "what is the difference between symbolic and hard links": {
-  "ans": "",
-  "err": "tny: that compares two topics — ask about one:\n  · Symbolic link\n  · Hard link\n"
+  "ans": "Symbolic links are paths to files or directories that point to another location, whereas hard links are direct name-to-inode associations within the same file system.",
+  "err": "\n\u001b[2m  1 Wikipedia · Symbolic link\n  2 Wikipedia · Hard link   33.9s\u001b[0m\n"
  },
  "why do some shell scripts use exec to run commands": {
-  "ans": "exec in Linux shell scripts replaces the shell interpreter with a direct child process, allowing commands to be executed without the shell's involvement and ensuring the program runs as a direct descendant of the shell's parent.",
-  "err": "unix.stackexchange.com_en_all_2026-02 · Why do some Linux shell scripts use exec to run commands? · §(lead), §1 Answers 1, §3 Answers 3, §(lead), §Redirection while running an interactive shell, §Redirection of command output to a log file (16.6s)\n"
+  "ans": "exec replaces the shell in place, making the executed program a direct child of the shell's parent rather than a grandchild through the shell, which is critical for embedded systems with limited RAM.",
+  "err": "\n\u001b[2m  1 unix.stackexchange · Why do some Linux shell scripts use exec to run commands?   25.7s\u001b[0m\n"
  },
  "what is wrong with parsing the output of ls": {
-  "ans": "Parsing the output of `ls` is generally discouraged due to security risks and unpredictable output formats, making it unsafe to use for counting files or other operations.",
-  "err": "unix.stackexchange.com_en_all_2026-02 · What is wrong with parsing the ls command ? · §(lead), §Linked, §(lead), §4 Answers 4, §Oh Yeah! What About Parsing ls Output?, §OUTPUT: (14.8s)\n"
+  "ans": "Parsing the output of `ls` can be risky due to varying file formats and potential security concerns, making it better to use tools like `find` or `grep` for specific file searches.",
+  "err": "\n\u001b[2m  1 unix.stackexchange · file $(ls /usr/bin/* | grep zip) command gives me errors. What&apos;s wrong?\n  2 unix.stackexchange · Why *not* parse `ls` (and what to do instead)?   31.9s\u001b[0m\n"
  },
  "what is the difference between SIGTERM and SIGKILL": {
-  "ans": "",
-  "err": "tny: that compares two topics — ask about one:\n  · SIGTERM\n  · SIGKILL\n"
+  "ans": "SIGTERM signals the termination of a process, while SIGKILL forces immediate termination without allowing the process to receive a graceful shutdown signal.",
+  "err": "\n\u001b[2m  1 Wikipedia · SIGTERM\n  2 Wikipedia · SIGKILL   11.9s\u001b[0m\n"
  },
  "how many moons does jupiter have": {
-  "ans": "There are 115 known moons of Jupiter as of April 2026.",
-  "err": "wikipedia_en_top_nopic_2026-06 · Moons of Jupiter · §(lead), §Origin and evolution, §(lead), §Context and implications, §1 Answers 1, §(lead) (7.6s)\n"
+  "ans": "There are 115 known moons of Jupiter as of April 9, 2026.",
+  "err": "\n\u001b[2m  1 Wikipedia · Moons of Jupiter   29.4s\u001b[0m\n"
  },
  "how fast can a cheetah run": {
-  "ans": "Cheetahs have a reliably reported maximum running speed of 104 km/h (65 mph).",
-  "err": "wikipedia_en_top_nopic_2026-06 · Cheetah · §Speed and acceleration, §Internal anatomy, §(lead), §1 Answers 1, §(lead), §3 Answers 3 (10.3s)\n"
+  "ans": "Cheetahs have been reliably reported running at speeds up to 104 km/h (65 mph), with an 11-year-old cheetah from the Cincinnati Zoo setting a record of 98 km/h (61 mph).",
+  "err": "\n\u001b[2m  1 Wikipedia · Cheetah   32.5s\u001b[0m\n"
  },
  "how tall is mount kilimanjaro": {
   "ans": "Mount Kilimanjaro has an elevation of 5,895 meters (19,341 feet).",
-  "err": "wikipedia_en_top_nopic_2026-06 · Mount Kilimanjaro · §(lead), §Toponymy, §(lead), §Symbolism and mythology, §Mountaineering, §(lead) (12.7s)\n"
+  "err": "\n\u001b[2m  1 Wikipedia · Mount Damavand\n  2 Wikipedia · Mount Elbrus   40.0s\u001b[0m\n"
  },
  "when did the berlin wall fall": {
   "ans": "The Berlin Wall fell on November 9, 1989, during the Revolutions of 1989.",
-  "err": "wikipedia_en_top_nopic_2026-06 · Fall of the Berlin Wall · §(lead), §20th anniversary celebrations, §Fall, §(lead), §(lead), §1 Answers 1 (16.5s)\n"
+  "err": "\n\u001b[2m  1 Wikipedia · Fall of the Berlin Wall\n  2 Wikipedia · Berlin Wall   33.1s\u001b[0m\n"
  },
  "what is the chemical formula of table salt": {
-  "ans": "Table salt is chemically NaCl, which corresponds to the chemical formula for sodium chloride.",
-  "err": "wikipedia_en_top_nopic_2026-06 · Chemical compound · §Definitions, §(lead), §3 Answers 3, §(lead), §4 Answers 4, §(lead) (9.2s)\n"
+  "ans": "Table salt is chemically sodium chloride (NaCl).",
+  "err": "\n\u001b[2m  1 Wikipedia · Chemical compound\n  2 cooking.stackexchange · Sweet = Sugar, Salty = Salt, Sour =?   30.7s\u001b[0m\n"
  },
  "who discovered penicillin": {
   "ans": "Alexander Fleming discovered penicillin in 1928.",
-  "err": "wikipedia_en_top_nopic_2026-06 · Penicillin · §Resistance, §Penicillin units, §Experiment, §Medical use and mass production, §2 Answers 2, §(lead) (6.7s)\n"
+  "err": "\n\u001b[2m  1 Wikipedia · Penicillin\n  2 Wikipedia · Alexander Fleming   30.7s\u001b[0m\n"
  },
  "who painted the mona lisa": {
   "ans": "Leonardo da Vinci painted the Mona Lisa.",
-  "err": "wikipedia_en_top_nopic_2026-06 · Mona Lisa · §Refuge, theft, and vandalism, §Description, §Mona Lisa, §(lead), §Legacy, §(lead) (5.4s)\n"
+  "err": "\n\u001b[2m  1 Wikipedia · Mona Lisa\n  2 Wikipedia · Lisa del Giocondo\n  3 Wikipedia · Leonardo da Vinci   34.1s\u001b[0m\n"
  },
  "how long is a marathon race": {
-  "ans": "Marathons are typically 42.195 kilometers (26.2 miles) in length, though some variations exist for specific events like the 100 Marathon Club or ultra marathons.",
-  "err": "wikipedia_en_top_nopic_2026-06 · Marathon · §Marathon races, §Multiple marathons, §Notes and references, §Fuel, §(lead) (17.7s)\n"
+  "ans": "Marathons are typically 42.195 kilometers (26.2 miles) in length, though some variations exist.",
+  "err": "\n\u001b[2m  1 Wikipedia · Marathon\n  2 Wikipedia · Long-distance running   31.0s\u001b[0m\n"
  },
  "how does photosynthesis work": {
-  "ans": "Photosynthesis is a system of biological processes by which photopigment-bearing autotrophic organisms, such as plants, algae, and cyanobacteria, convert light energy into chemical energy.",
-  "err": "wikipedia_en_top_nopic_2026-06 · Photosynthesis · §Cyanobacteria and the evolution of photosynthesis, §(lead), §(lead), §1 Answers 1, §3 Answers 3, §(lead) (17.1s)\n"
+  "ans": "Photosynthesis is a system of biological processes by which photopigment-bearing autotrophic organisms, such as most plants, algae, and cyanobacteria, convert light energy into chemical energy.",
+  "err": "\n\u001b[2m  1 Wikipedia · Photosynthesis   35.2s\u001b[0m\n"
  },
  "what causes ocean tides": {
-  "ans": "Oceanic tides are primarily driven by the Moon's gravitational tidal forces upon the Earth, though they are also substantially modulated by the Sun's tidal forces, the rotation of the Earth, and the shape of rocky continents blocking oceanic water.",
-  "err": "wikipedia_en_top_nopic_2026-06 · Ocean · §Tides, §Types of ocean currents, §History of tidal theory, §Amplitude and cycle time, §Dynamic theory, §Classical era (25.9s)\n"
+  "ans": "Oceanic tides are primarily driven by the Moon's gravitational tidal forces upon the Earth, though they are also substantially modulated by the Sun's tidal forces, Earth's rotation, and the shape of rocky continents.",
+  "err": "\n\u001b[2m  1 Wikipedia · Ocean\n  2 Wikipedia · Tide   29.6s\u001b[0m\n"
  },
  "why is the sky blue": {
   "ans": "Rayleigh scattering occurs when sunlight passes through the atmosphere, causing blue wavelengths to be scattered more widely by oxygen and nitrogen molecules than red wavelengths, which results in the sky appearing blue.",
-  "err": "wikipedia_en_top_nopic_2026-06 · Sky Blue Sky · §(lead), §Release and reception, §Sky and sea, §Artificial blues, §Applications of blue sky catastrophe in other fields, §(lead) (21.3s)\n"
+  "err": "\n\u001b[2m  1 Wikipedia · Blue   7.3s\u001b[0m\n"
  },
  "what is plate tectonics": {
-  "ans": "Plate tectonics is a theory explaining the movement of Earth's lithosphere over time through the interaction of mantle convection and crustal forces, including the generation of earthquakes and volcanic activity.",
-  "err": "wikipedia_en_physics_nopic_2026-07 · Plate tectonics · §Possible tidal effect on plate tectonics, §Emergence of plate tectonics and past plate motions, §Possible tidal effect on plate tectonics, §Emergence of plate tectonics and past plate motions, §GPlates Python Binding, §GPlately (16.0s)\n"
+  "ans": "Plate tectonics is a scientific theory describing the movement of Earth's lithosphere over long geological timescales, driven primarily by mantle convection and influenced by external forces such as tidal effects.",
+  "err": "\n\u001b[2m  1 Wikipedia · Plate tectonics\n  2 Wikipedia · Plate tectonics   22.8s\u001b[0m\n"
  },
  "how does a vaccine produce immunity": {
-  "ans": "Vaccines produce immunity by presenting specific antigens to the immune system, which triggers an adaptive response. This response can lead to either humoral immunity (antibody production) or cellular immunity (T-cell activation), depending on the type of vaccine used and the pathogen involved.",
-  "err": "wikipedia_en_top_nopic_2026-06 · Vaccine · §Limitations, §(lead), §(lead), §1 Answers 1, §Disadvantages, §(lead) (26.2s)\n"
+  "ans": "Vaccines produce immunity by presenting specific antigens to the immune system, which triggers an adaptive response. This response can lead to either humoral immunity (antibody production) or cellular immunity (T-cell activation), depending on the type of vaccine and the pathogen involved.",
+  "err": "\n\u001b[2m  1 Wikipedia · Vaccine   27.2s\u001b[0m\n"
  },
  "how do you perform CPR on an adult": {
-  "ans": "Standard CPR involves chest compressions at a rate of 100–120 per minute with a depth of at least 2 cm, followed by rescue breaths if the victim is not breathing.",
-  "err": "biology.stackexchange.com_en_all_2026-02 · Is hands-only CPR as effective as traditional CPR? · §2 Answers 2, §(lead), §Rate and rhythm, §Medical uses, §Chance of receiving CPR, §Prone CPR (17.0s)\n"
+  "ans": "According to the reference, standard CPR is performed with the victim in a supine position, whereas prone CPR involves turning the head to the side and compressing the back.",
+  "err": "\n\u001b[2m  1 Wikipedia · Cardiopulmonary resuscitation   25.7s\u001b[0m\n"
  },
  "how do you make compost at home": {
-  "ans": "Composting can destroy pathogens and seeds by reaching temperatures between 50 and 70 °C (122 and 158 °F), which kill microbes and make oocysts unviable.",
-  "err": "wikipedia_en_top_nopic_2026-06 · Compost · §Pathogen removal, §Aerated static-pile composting, §(lead), §1 Answers 1, §(lead) (19.6s)\n"
+  "ans": "Composting can destroy pathogens and seeds by reaching temperatures between 50 and 70 °C (122 and 158 °F), which kill microbes and oocysts, or using aerated static-pile composting to keep material aerobic without physical manipulation.",
+  "err": "\n\u001b[2m  1 Wikipedia · Compost   28.8s\u001b[0m\n"
  },
  "how do I propagate a plant from cuttings": {
   "ans": "not found",
-  "err": "wikipedia_en_100_2026-07 · Plant · §Ornamental plants, §Plant cells, §Amazonian coca, §(lead), §Difficulty of production planning, §(lead) (14.9s)\ntny: rejected — how-to answer names no command from the reference\n     the library has:\n       TED plants                        657 MB  tny --corpus add ted_mul_plants\n"
+  "err": "tny: rejected — how-to answer names no command from the reference\n     the library has:\n       TED plants                        657 MB  tny --corpus add ted_mul_plants\n"
  }
 }

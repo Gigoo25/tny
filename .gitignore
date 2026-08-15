@@ -13,3 +13,4 @@ bench/.sweep-cache.json
 # `bun bench/extract-cli.mjs --rebuild` (~50 s), and it carries scraped page text
 bench/.contexts.json
 bench/.embeds.json
+bench/.shortlists.json

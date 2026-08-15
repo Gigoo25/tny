@@ -2294,6 +2294,61 @@ measurable harm is confined to a fixture that predates it.
 The honest reading of both halves: the model is at its ceiling, and the corpus is at the point
 where adding to it trades one question's answer for another's.
 
+## F92 — it is a search engine, and the benchmark has been grading it as an oracle
+
+Adding man pages cost six answers end-to-end: 42/58 → 36/58, refusals halved 8 → 4 and wrong
+answers more than doubled 8 → 18. Ten cases broke, four were fixed (two of them the
+comparison refusals F86 predicted). The obvious conclusion is that the book was a mistake.
+
+Look at what "broke" though:
+
+```
+question                                  before                after
+how do I add a new user with useradd      Arch Wiki page        man useradd(8), usermod(8)
+how do I mount a filesystem by UUID       Arch Wiki Fstab       man fstab(5)
+how do I change the hostname              Arch Wiki Network…    man hostnamectl(1)
+```
+
+Every one of those is a *better source* for the question asked. The fixture calls them
+failures because it was authored against a sixteen-book library and encodes one specific
+article per question, so a new and better source can only ever score as a regression. The
+grader measures "did this reproduce the fact I wrote down", which is an oracle's job.
+
+That is the wrong target. This is a local search engine: it should point at the right page,
+it will not be right every time — neither is Google — and the user must be able to steer it.
+Measured against *that*, the man pages are a straight gain: `in shortlist` is unmoved at
+48/58, the right pages are all still retrieved, and the new book adds 12,626 pages of exactly
+the reference a terminal user asks for.
+
+What the answer numbers still say, and this part is real: **an answer built from a man page is
+often worse prose than one built from a wiki page**. `--oneline` came back as "disables tab
+expansion"; "what is a cookie made of" answered about zombie cookies. Man pages are dense flag
+lists, and a 0.8B model paraphrasing one produces confident mush. That is a section-selection
+problem (find the paragraph documenting the flag) rather than an argument against the corpus.
+
+### What shipped instead of removing the book
+
+Steering, on the same prompt (F75):
+
+```
+  1 devdocs man · useradd (8)
+  2 devdocs man · groupadd (8)                                    35.0s
+  ▸ ask a follow-up · 1-2 use that source · s see all 8 matches · o open · n new · q quit
+```
+
+`s` prints the whole shortlist with a mark against what was read; a digit re-asks the same
+question against that one result, skipping retrieval entirely. On the useradd case the right
+page is rank 4, one keypress away, and steering to it turns the answer from
+
+> useradd creates a new user account using the specified options, typically appending the
+> LOGIN name to the BASE_DIR…
+
+into `# useradd -m -G additional_groups -s login_shell username`, in 22.6 s.
+
+One turn should still be enough — steering is the safety net, not the excuse — but the
+measurement that decides corpus changes from here is *was the right page in the shortlist*,
+not *did the sentence match a regex written in an earlier session*.
+
 ## Exploration backlog — speed
 
 The cost model, measured (0.8B Q8_0, 4 threads, this CPU):

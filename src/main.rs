@@ -472,7 +472,8 @@ fn human_book(name: &str) -> String {
     }
 }
 
-/// An article the answer was built from, kept so the prompt can open it.
+/// An article the answer was built from, kept so the prompt can open or re-use it.
+#[derive(Clone)]
 struct Source {
     book: String,
     path: String,
@@ -481,7 +482,11 @@ struct Source {
 
 enum Next {
     Ask(String, bool),
+    /// Re-ask the same question against one chosen result — the steer.
+    Use(usize),
     Open(usize),
+    /// Print the whole shortlist, not just what was read.
+    More,
     Again,
     Quit,
 }
@@ -493,8 +498,10 @@ enum Next {
 fn run(cfg: &Cfg, question: &str, follow: bool) -> Result<i32, String> {
     let mut q = question.to_string();
     let mut follow = follow;
+    let mut focus: Option<Source> = None;
     loop {
-        let (code, sources) = answer_once(cfg, &q, follow)?;
+        let (code, sources, shortlist) = answer_once(cfg, &q, follow, focus.as_ref())?;
+        focus = None;
         let interactive = std::io::stdin().is_terminal()
             && std::io::stderr().is_terminal()
             && !cfg.rank_only
@@ -506,14 +513,34 @@ fn run(cfg: &Cfg, question: &str, follow: bool) -> Result<i32, String> {
         // After the answer, and only here: a check that delays an answer is a check that
         // gets disabled.
         maybe_offer_update(cfg);
-        if sources.is_empty() {
+        if shortlist.is_empty() && sources.is_empty() {
             return Ok(code);
         }
+        // Steering works off the shortlist, which is a superset of what was read: the answer
+        // may have come from the wrong three, and the right page is often the fourth.
+        let list = if shortlist.is_empty() { sources.clone() } else { shortlist };
+        let mut showing_all = false;
         loop {
-            match prompt(&sources)? {
+            match prompt(&list, sources.len(), showing_all)? {
                 Next::Quit => return Ok(code),
                 Next::Again => continue,
-                Next::Open(i) => open_source(cfg, &sources, i),
+                Next::More => {
+                    showing_all = true;
+                    for (i, s) in list.iter().enumerate() {
+                        let mark = if i < sources.len() { "·" } else { " " };
+                        eprintln!("\x1b[2m {mark}{} {} · {}\x1b[0m", i + 1, human_book(&s.book), s.title);
+                    }
+                }
+                Next::Open(i) => open_source(cfg, &list, i),
+                // The steer: same question, that source, no retrieval.
+                Next::Use(i) => match list.get(i) {
+                    Some(s) => {
+                        eprintln!("\x1b[2m  using {}\x1b[0m", s.title);
+                        focus = Some(s.clone());
+                        break;
+                    }
+                    None => continue,
+                },
                 Next::Ask(text, f) => {
                     q = text;
                     follow = f;
@@ -542,9 +569,16 @@ fn key() -> Option<u8> {
     (n == 1).then_some(b[0])
 }
 
-fn prompt(sources: &[Source]) -> Result<Next, String> {
-    let open = if sources.len() > 1 { format!("1-{} open", sources.len()) } else { "1 open".into() };
-    eprint!("\x1b[2m  ▸ ask a follow-up · n new topic · {open} · q quit\x1b[0m\n> ");
+fn prompt(list: &[Source], read: usize, showing_all: bool) -> Result<Next, String> {
+    // The digits are the steer, not the browser: pointing tny at the right page is the thing
+    // a user needs most when the first answer missed, so it costs one keypress. Opening a
+    // page in a browser is the rarer want, so it costs two (`o` then the digit).
+    let hint = if showing_all || list.len() <= read {
+        format!("1-{} use that source", list.len())
+    } else {
+        format!("1-{read} use that source · s see all {} matches", list.len())
+    };
+    eprint!("\x1b[2m  ▸ ask a follow-up · {hint} · o open · n new · q quit\x1b[0m\n> ");
     std::io::stderr().flush().ok();
     // No stty means no single-key mode; one answer and out beats a broken terminal.
     let Some(k) = key() else { return Ok(Next::Quit) };
@@ -553,9 +587,30 @@ fn prompt(sources: &[Source]) -> Result<Next, String> {
             eprintln!();
             Next::Quit
         }
+        // Re-ask the same question against one chosen result.
         b'1'..=b'9' => {
             eprintln!();
-            Next::Open((k - b'1') as usize)
+            Next::Use((k - b'1') as usize)
+        }
+        b's' => {
+            eprintln!();
+            Next::More
+        }
+        // `o` then a digit: open in the browser. kiwix already serves the corpora over HTTP,
+        // so this works with no network.
+        b'o' => {
+            eprint!("open which? ");
+            std::io::stderr().flush().ok();
+            match key() {
+                Some(d @ b'1'..=b'9') => {
+                    eprintln!();
+                    Next::Open((d - b'1') as usize)
+                }
+                _ => {
+                    eprintln!();
+                    Next::Open(0)
+                }
+            }
         }
         b'\r' | b'\n' => Next::Again,
         // F29: a follow-up carries the previous turn into the retrieval query; `n` drops it,
@@ -607,7 +662,15 @@ fn open_source(cfg: &Cfg, sources: &[Source], i: usize) {
 
 /// One question, one answer. Returns the exit code and the articles the answer was built
 /// from, so the prompt underneath can offer to open them.
-fn answer_once(cfg: &Cfg, question: &str, follow: bool) -> Result<(i32, Vec<Source>), String> {
+/// `focus` is the steer: when the user picks a result, retrieval is skipped and the answer is
+/// built from that one article. One turn should be enough — this is the safety net for when
+/// it is not, not an excuse for it not to be.
+fn answer_once(
+    cfg: &Cfg,
+    question: &str,
+    follow: bool,
+    focus: Option<&Source>,
+) -> Result<(i32, Vec<Source>, Vec<Source>), String> {
     let t_all = Instant::now();
     let quiet = cfg.rank_only || cfg.dump || cfg.context;
     let mut spin = Spin::start(std::io::stderr().is_terminal() && !quiet, "starting the library");
@@ -617,13 +680,13 @@ fn answer_once(cfg: &Cfg, question: &str, follow: bool) -> Result<(i32, Vec<Sour
     // F85: a repeat costs a file read instead of 40 s. The key includes the turn being
     // followed, so the same words after a different question are a different question.
     let key = cache_key(cfg, question, prev.last());
-    if !cfg.fresh && !cfg.rank_only && !cfg.dump && !cfg.context {
+    if focus.is_none() && !cfg.fresh && !cfg.rank_only && !cfg.dump && !cfg.context {
         if let Some((answer, sources)) = cached(cfg, &key) {
             spin.stop();
             println!("{answer}");
             eprintln!("\n\x1b[2m  {}   cached\x1b[0m", cite_lines(&sources).join("\n  "));
             save_turn(cfg, question, &answer);
-            return Ok((0, sources));
+            return Ok((0, sources.clone(), sources));
         }
     }
     // F29: the retrieval query is `<prev question> <this question>`. NEVER a model rewrite:
@@ -702,13 +765,29 @@ fn answer_once(cfg: &Cfg, question: &str, follow: bool) -> Result<(i32, Vec<Sour
     let t_search = t.elapsed();
     if cands.is_empty() {
         spin.stop();
-        return Ok((no_local_match(cfg, &query), vec![]));
+        return Ok((no_local_match(cfg, &query), vec![], vec![]));
     }
     // A comparison replaces the shortlist with one article per side, so the model is shown
     // both things it is being asked to compare rather than one and its own imagination.
-    let ranked = match compare {
-        Some(pair) => pair,
-        None => rank_articles(&retrieval_q, &cands),
+    let ranked = match focus {
+        // Steered: one article, chosen by the user, and no ranking to argue with.
+        Some(s) => vec![retrieve::Candidate {
+            title: s.title.clone(),
+            book: s.book.clone(),
+            path: s.path.clone(),
+            snip: String::new(),
+            kind: retrieve::page_kind(&s.title, &s.path),
+            rank: 0,
+        }],
+        None => match compare {
+            // F91: TNY_RANK=rrf swaps the linear score for reciprocal rank fusion, so the
+            // two can be compared on one build rather than two.
+            Some(pair) => pair,
+            None if std::env::var("TNY_RANK").as_deref() == Ok("rrf") => {
+                retrieve::rank_articles_rrf(&retrieval_q, &cands)
+            }
+            None => rank_articles(&retrieval_q, &cands),
+        },
     };
     // Retrieval is 2 % of a query's wall time, so measuring ranking through full generation
     // costs 80 s per case and hides the thing under test. `--rank` stops here and prints the
@@ -718,7 +797,7 @@ fn answer_once(cfg: &Cfg, question: &str, follow: bool) -> Result<(i32, Vec<Sour
         for c in ranked.iter().take(8) {
             println!("{}\t{}\t{}", c.book, c.title, c.path);
         }
-        return Ok((0, vec![]));
+        return Ok((0, vec![], vec![]));
     }
     if cfg.dump {
         // Every candidate, unranked, as JSON: lets a scorer be tried offline in
@@ -733,7 +812,7 @@ fn answer_once(cfg: &Cfg, question: &str, follow: bool) -> Result<(i32, Vec<Sour
             })
             .collect();
         println!("{}", serde_json::to_string(&rows).unwrap_or_default());
-        return Ok((0, vec![]));
+        return Ok((0, vec![], vec![]));
     }
     // Only now is the model needed: everything above is retrieval. `--context` stops before
     // the load, so inspecting what the model was given costs a search and a fetch.
@@ -752,6 +831,19 @@ fn answer_once(cfg: &Cfg, question: &str, follow: bool) -> Result<(i32, Vec<Sour
     spin.say(format!("reading {}", ranked[0].title));
     let t = Instant::now();
     let mut docs: Vec<(&retrieve::Candidate, String)> = Vec::new();
+    // The eight results the user can steer with, not just the three that were read.
+    let shortlist: Vec<Source> = ranked
+        .iter()
+        .take(8)
+        .map(|c| Source { book: c.book.clone(), path: c.path.clone(), title: c.title.clone() })
+        .collect();
+
+    // F91: one book can win every slot — "how do I change the hostname" put six man pages
+    // above the ArchWiki page, so all three articles the model reads came from one source.
+    // Capping articles per book was the obvious fix and was measured and rejected: cap=2 is
+    // neutral on the fixture (46/58 either way) and costs a case on the held-out set
+    // (evidence 50/55 -> 49/55); cap=1 costs three (43/58), because two sections of one
+    // article often carry an answer between them. Flooding is real and this is not its fix.
     for c in ranked.iter().take(top_articles()) {
         match article(&cfg.kiwix, &c.book, &c.path) {
             Ok(html) => docs.push((c, html)),
@@ -779,7 +871,7 @@ fn answer_once(cfg: &Cfg, question: &str, follow: bool) -> Result<(i32, Vec<Sour
     let picked = retrieve::Picked { heads, text: parts.join("\n\n") };
     if cfg.context {
         println!("{}", picked.text);
-        return Ok((0, vec![]));
+        return Ok((0, vec![], vec![]));
     }
 
     // F32: grounding reads the whole article, not the slice sent to the model — the slice
@@ -840,7 +932,7 @@ fn answer_once(cfg: &Cfg, question: &str, follow: bool) -> Result<(i32, Vec<Sour
         // one moment a download suggestion is certainly not noise.
         suggest_corpus(cfg, &query);
         println!("not found");
-        return Ok((3, sources));
+        return Ok((3, sources, shortlist));
     }
     println!("{}", answer.trim());
     // F75: the source line was `wikipedia_en_top_nopic_2026-06 · Sky Blue Sky · §Release and
@@ -856,7 +948,7 @@ fn answer_once(cfg: &Cfg, question: &str, follow: bool) -> Result<(i32, Vec<Sour
     );
     save_turn(cfg, question, &answer);
     cache_put(cfg, &key, answer.trim(), &sources);
-    Ok((0, sources))
+    Ok((0, sources, shortlist))
 }
 
 fn cite_lines(sources: &[Source]) -> Vec<String> {
