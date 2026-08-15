@@ -15,9 +15,14 @@ import { CASES as INST } from "./fixture-instructional.mjs";
 import { CASES as QA } from "./fixture-qa.mjs";
 import { CASES as GEN } from "./fixture-general.mjs";
 import { CASES as AMB } from "./fixture-ambiguous.mjs";
+import { EXPECT } from "./expect.mjs";
 
-const CASES = [["inst", INST], ["qa", QA], ["gen", GEN], ["amb", AMB]]
-  .flatMap(([set, cs]) => cs.map(c => [set, ...c]));
+// A case carries [query, intent, book, titleRe, needleRe, expectRe?]. `fixture-ambiguous.mjs`
+// authors its `expectRe` inline; the other three take theirs from `expect.mjs` by position, so
+// the retrieval fixtures stay about articles and answer grading lives in one file.
+const CASES = [["inst", INST, EXPECT.instructional], ["qa", QA, EXPECT.qa],
+               ["gen", GEN, EXPECT.general], ["amb", AMB, []]]
+  .flatMap(([set, cs, exp]) => cs.map((c, i) => [set, ...c.slice(0, 5), c[5] ?? exp[i]]));
 
 
 // `needleRe` matches the *article's* prose, so it cannot be applied to an answer directly:

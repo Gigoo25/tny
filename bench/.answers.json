@@ -1,42 +1,234 @@
 {
  "what is a kernel in corn": {
   "ans": "A corn kernel is a small one-seeded dry indehiscent fruit (as of corn or wheat) in which the fruit and seed fuse in a single grain.",
-  "err": "biology.stackexchange.com_en_all_2026-02 · Are corn kernels considered a grain · §1 Answers 1, §Boil the corn, §Fry the corn on a lower temperature, §4 Answers 4 (16.5s)\n"
+  "err": "biology.stackexchange.com_en_all_2026-02 · Are corn kernels considered a grain · §1 Answers 1, §Boil the corn, §Fry the corn on a lower temperature, §4 Answers 4 (22.0s)\n"
  },
  "what is a shell in biology": {
-  "ans": "In biology, a shell refers to the hard outer covering of an animal's body, typically made of keratinous plates or bony structures (like a turtle shell) or exoskeletons found in arthropods and mollusks.",
-  "err": "wikipedia_en_top_nopic_2026-06 · Turtle shell · §Shell nomenclature, §Triassic: evolution of complete shell, §Accessibility, §Tools, §Synthesis, §Biomedical applications (15.6s)\n"
+  "ans": "In biology, a shell refers to the hard outer covering of an animal's body, typically made of keratinous plates or bony structures, which protects internal organs and serves as a barrier against environmental hazards.",
+  "err": "wikipedia_en_top_nopic_2026-06 · Turtle shell · §Shell nomenclature, §Triassic: evolution of complete shell, §Accessibility, §Tools, §Synthesis, §Biomedical applications (15.4s)\n"
  },
  "what is a cookie made of": {
-  "ans": "Based on the reference material, a cookie can be made of butter, sugar, and flour, with the dough likely containing self-caramelized sugar similar to caramel sauce or milk caramels.",
-  "err": "wikipedia_en_computer_nopic_2026-06 · Zombie cookie · §Controversies, §Purpose, §3 Answers 3, §1 Answers 1 (12.7s)\n"
+  "ans": "Based on the provided text, a cookie made with sugar and butter will likely be chewy caramel due to the self-caramelization process described in the \"Zombie cookie\" controversy section.",
+  "err": "wikipedia_en_computer_nopic_2026-06 · Zombie cookie · §Controversies, §Purpose, §3 Answers 3, §1 Answers 1 (13.1s)\n"
  },
  "how do python snakes kill their prey": {
-  "ans": "The reticulated python is an ambush predator that waits until prey enters its strike range before seizing it in its coils and killing by constriction. The Burmese python is a sit-and-wait predator that grabs prey with sharp teeth and wraps its body around the animal to kill it through constriction, swallowing the prey whole.",
-  "err": "wikipedia_en_top_nopic_2026-06 · Reticulated python · §Danger to humans, §Diet, §As an invasive species, §Diet, §1 Answers 1 (13.7s)\n"
+  "ans": "The reticulated python is an ambush predator that waits until prey enters its strike range before seizing it in coils and killing by constriction. The Burmese python is a sit-and-wait predator that grabs prey with sharp teeth, wraps its body around the animal to kill it through constriction, and then swallows the prey whole.",
+  "err": "wikipedia_en_top_nopic_2026-06 · Reticulated python · §Danger to humans, §Diet, §As an invasive species, §Diet, §1 Answers 1 (15.0s)\n"
  },
  "how does the brain consolidate long term memory": {
-  "ans": "Long-term memory consolidation involves stable and permanent changes in neural connections that occur throughout the brain, primarily mediated by long-term potentiation (LTP) and long-term depression (LTD), which are thought to be mediated by specific brain regions.",
-  "err": "wikipedia_en_top_nopic_2026-06 · Memory · §Long-term memory, §Physiology, §3 Answers 3, §Long-term spatial memory, §Short-term spatial memory (24.2s)\n"
+  "ans": "The hippocampus is essential for consolidating new information into long-term memory, and this process relies on stable neural connections spread throughout the brain.",
+  "err": "wikipedia_en_top_nopic_2026-06 · Memory · §Long-term memory, §Physiology, §3 Answers 3, §Long-term spatial memory, §Short-term spatial memory (11.1s)\n"
  },
  "what is a kernel in an operating system": {
-  "ans": "A kernel is the core component of an operating system that manages hardware resources and provides services to applications, allowing them to interact with the computer's hardware without direct user-level permission.",
-  "err": "wikipedia_en_computer_nopic_2026-06 · Kernel (operating system) · §Early operating system kernels, §System calls, §Early operating system kernels, §System calls, §Comparison criteria, §Supported kernel execution environment (13.0s)\n"
+  "ans": "A kernel is the core component of an operating system that manages hardware resources and provides essential services to applications, allowing them to interact with the computer's hardware without direct user-level access.",
+  "err": "wikipedia_en_computer_nopic_2026-06 · Kernel (operating system) · §Early operating system kernels, §System calls, §Early operating system kernels, §System calls, §Comparison criteria, §Supported kernel execution environment (13.6s)\n"
  },
  "what is a shell in computing": {
-  "ans": "A shell in computing is an operating system shell that uses alphanumeric characters typed on a keyboard to provide instructions and data to the operating system, interactively.",
-  "err": "wikipedia_en_computer_nopic_2026-06 · Shell (computing) · §Command-line shells, §Overview, §Command-line shells, §Overview, §Definition, §Example (12.8s)\n"
+  "ans": "A command-line shell is an operating system interface that uses alphanumeric characters to interact with the computer's underlying kernel, managing user-system interaction and executing programs via file management and process control.",
+  "err": "wikipedia_en_computer_nopic_2026-06 · Shell (computing) · §Command-line shells, §Overview, §Command-line shells, §Overview, §Definition, §Example (12.7s)\n"
  },
  "what is an http cookie used for": {
-  "ans": "An HTTP cookie is a text file stored in the browser's memory that allows the user to access data on their behalf, such as remembering a password or session ID.",
-  "err": "wikipedia_en_computer_nopic_2026-06 · HTTP cookie · §Setting a cookie, §Http-only cookie, §Setting a cookie, §Http-only cookie, §CookieJar and FileCookieJar Objects, §FileCookieJar subclasses and co-operation with web browsers (10.5s)\n"
+  "ans": "An http cookie is a session identifier stored in the browser's memory that allows a user to access resources on a website without needing to log in.",
+  "err": "wikipedia_en_computer_nopic_2026-06 · HTTP cookie · §Setting a cookie, §Http-only cookie, §Setting a cookie, §Http-only cookie, §CookieJar and FileCookieJar Objects, §FileCookieJar subclasses and co-operation with web browsers (12.2s)\n"
  },
  "what is python the programming language": {
-  "ans": "Python is a multi-paradigm programming language supported by extensions like design by contract and logic programming.",
-  "err": "wikipedia_en_computer_nopic_2026-06 · Python (programming language) · §Design philosophy and features, §Languages influenced by Python, §Design philosophy and features, §Languages influenced by Python, §Alternative implementations, §List packages built for a specific Python version (10.3s)\n"
+  "ans": "Python is a multi-paradigm programming language supported by dynamic typing and reference counting.",
+  "err": "wikipedia_en_computer_nopic_2026-06 · Python (programming language) · §Design philosophy and features, §Languages influenced by Python, §Design philosophy and features, §Languages influenced by Python, §Alternative implementations, §List packages built for a specific Python version (14.0s)\n"
  },
  "what is virtual memory in a computer": {
-  "ans": "Virtual memory allows a computer to extend its physical memory beyond the available RAM by using a system that divides memory into segments and pages, enabling programs to access data from secondary storage like hard drives.",
-  "err": "wikipedia_en_computer_nopic_2026-06 · Virtual memory · §Segmented virtual memory, §History, §Segmented virtual memory, §History, §Origins, §Benefits (14.5s)\n"
+  "ans": "Virtual memory allows a computer to extend its physical memory beyond its capacity by using a system that divides memory into segments and pages, enabling programs to access data from secondary storage like hard drives when primary memory is insufficient.",
+  "err": "wikipedia_en_computer_nopic_2026-06 · Virtual memory · §Segmented virtual memory, §History, §Segmented virtual memory, §History, §Origins, §Benefits (16.5s)\n"
+ },
+ "how do I change the hostname of my machine": {
+  "ans": "To change the hostname, edit the `/etc/hostname` file to include your desired name or use `hostnamectl` to set it via command line.",
+  "err": "archlinux_en_all_maxi_2026-07 · Network configuration · §Set the hostname, §Local network hostname resolution, §Some example headers, §Variables, §Files (41.4s)\n"
+ },
+ "how do I enable a systemd service so it starts at boot": {
+  "ans": "To enable a systemd service so it starts at boot, use the `--now` switch with the `enable` command.",
+  "err": "archlinux_en_all_maxi_2026-07 · Systemd · §Using units, §Running services after the network is up, §History, §Design, §History, §Design (31.7s)\n"
+ },
+ "how do I add a new user with useradd": {
+  "ans": "To add a new user using the `useradd` command, you must specify the `-m` option to create the home directory and `-d` to specify the directory path. You can also use `-c` to set the command line for the shell or `-s` to set the shell, though these options are not required for basic creation.",
+  "err": "archlinux_en_all_maxi_2026-07 · Users and groups · §User management, §Example adding a user, §1 Answers 1, §Enable support to build unprivileged containers, §WARN[0000] \"/\" is not a shared mount, this could cause issues or missing mounts with rootless containers (17.1s)\n"
+ },
+ "how do I resize an ext4 filesystem": {
+  "ans": "Resize2fs can resize ext4 file systems by specifying the desired size or defaulting to the current partition size; ensure the filesystem is unmounted and e2fsck is run first before resizing.",
+  "err": "archlinux_en_all_maxi_2026-07 · Ext4 · §Resize filesystem, §Enabling metadata checksums in existing filesystems, §(lead), §Resizing partitions, §Shrinking partitions (10.6s)\n"
+ },
+ "how do I mount a filesystem by UUID in fstab": {
+  "ans": "To mount a filesystem by UUID in fstab, use the `UUID=` option to specify the unique identifier for the target device. For example, `UUID=b411dc99-f0a0-4c87-9e05-184977be8539 /home ext4` mounts the specified UUID to the home directory.",
+  "err": "archlinux_en_all_maxi_2026-07 · Fstab · §Usage, §Modifying user permissions and ownership, §2 Answers 2, §Filesystems, §Versions 1 and 6 (date–time and MAC address) (13.4s)\n"
+ },
+ "how do I enable the en_US.UTF-8 locale": {
+  "ans": "To enable the en_US.UTF-8 locale, uncomment the corresponding entry in `/etc/locale.gen` and run `locale-gen`.",
+  "err": "archlinux_en_all_maxi_2026-07 · Locale · §Generating locales, §Metric measurements with US locale, §23.1.4. Locale Providers, §23.1.3. Selecting Locales, §Element type declarations, §Entity declarations (6.3s)\n"
+ },
+ "how do I let a user run commands with sudo": {
+  "ans": "sudo allows users to execute commands with elevated privileges by adding them to the `wheel` group and configuring their permissions in `/etc/sudoers.d/`.",
+  "err": "archlinux_en_all_maxi_2026-07 · Sudo · §Harden with sudo example, §Example entries, §Tools and similar programs, §Configuration, §5.1.2. How to run a Python script, §5.1.1. Installation steps (6.0s)\n"
+ },
+ "how do I undo the last commit but keep my changes": {
+  "ans": "Use `git reset --hard HEAD~3` to remove the last three commits while keeping your working directory and index unchanged.",
+  "err": "devdocs_en_git_2026-07 · git reset · §Examples, §Description, §Post-war period, §Government and politics, §Recent changes patrolling, §Maintenance of listings of applications (26.2s)\n"
+ },
+ "how do I change the message of my last commit": {
+  "ans": "To change the message of your last commit, run the following command in the current directory: git commit -m 'Your new commit message'.",
+  "err": "wikipedia_en_computer_nopic_2026-06 · Commit (version control) · §Git, §Mercurial (hg), §Options, §Examples, §Commit charge, §Commit limit (7.1s)\n"
+ },
+ "how do I create a docker image tag for a registry": {
+  "ans": "To create a docker image tag for a private registry, you must use the `docker tag` command with the registry hostname and port specified (e.g., `docker tag <image> registry-host:5000/myname`).",
+  "err": "devdocs_en_docker_2026-07 · docker tag · §Tag an image for a private repository, §Description, §Image pulls from Docker Hub are rate limited, §Remove Docker and images, §Push all tags of an image, §Push a new image to a registry (14.3s)\n"
+ },
+ "how do I add a login role with a password in postgresql": {
+  "ans": "To add a login role with a password in PostgreSQL, you must use the `CREATE ROLE` command with the `LOGIN` parameter set to `NOLOGIN`, and then grant the role membership using the `GRANT` command.",
+  "err": "devdocs_en_postgresql_2026-08 · CREATE ROLE · §Parameters, §Warning, §Require password for login, §Configure PostgreSQL to be accessible from remote hosts, §Description, §Parameters (12.1s)\n"
+ },
+ "how do I create a virtual environment in python": {
+  "ans": "You can create a virtual environment using the `python -m venv` command, which installs Python and necessary modules into a specific directory.",
+  "err": "archlinux_en_all_maxi_2026-07 · Python/Virtual environment · §Python versions, §Overview, §Virtual environment, §Third-party packages, §12.2. Creating Virtual Environments, §12.1. Introduction (9.4s)\n"
+ },
+ "what does unwrap_or_default return on an Option": {
+  "ans": "not found",
+  "err": "wikipedia_en_computer_nopic_2026-06 · Null coalescing operator · §Rust, §C#, §9.16.3. SQL/JSON Query Functions, §9.16.2.2. Strict and Lax Modes, §2 Answers 2 (14.7s)\ntny: rejected — identifier not in reference: unwrap_or_default\n"
+ },
+ "how does bash substitute a default value if a variable is unset": {
+  "ans": "Bash uses a colon command (`:`) to substitute a default value for an unset variable.",
+  "err": "unix.stackexchange.com_en_all_2026-02 · Bash function that assigns a default value to unset variables · §1 Answers 1, §(lead), §2 Answers 2 (4.3s)\n"
+ },
+ "what does the --oneline flag do in git log": {
+  "ans": "The `--oneline` flag disables tab expansion and formatting, displaying commits as a single line with no indentation or diff output.",
+  "err": "devdocs_en_git_2026-07 · git log · §Commit Formatting, §Diff formatting, §Visual representation, §Using git-credential-netrc as credential-helper, §Commit Limiting, §Options (5.6s)\n"
+ },
+ "what arguments does json.dumps take": {
+  "ans": "json.dumps takes the following arguments: obj, *, skipkeys, ensure_ascii, check_circular, allow_nan, cls, indent, separators, default, sort_keys, and **kw.",
+  "err": "devdocs_en_python_2026-08 · json · §Basic Usage, §Encoders and Decoders, §4 Answers 4, §Drawbacks to this method, §Conventions for Public Functions and Macros, §Event-Specific Key/Value Pairs (5.9s)\n"
+ },
+ "what precision does the numeric data type have in postgresql": {
+  "ans": "The reference material states that PostgreSQL supports arbitrary-precision numeric types, but it does not specify a single fixed precision value for these types.",
+  "err": "devdocs_en_postgresql_2026-08 · Numeric Types · §8.1.2. Arbitrary Precision Numbers, §8.1.3. Floating-Point Types, §Data types, §Database administration, §Compatibility (6.9s)\n"
+ },
+ "what does the --rm option do in docker run": {
+  "ans": "The `--rm` option removes the container from the Docker daemon when the command terminates.",
+  "err": "devdocs_en_docker_2026-07 · docker run · §Add host device to container (--device), §Options, §With the --gpus option (recommended), §With NVIDIA container runtime, §Runtime privilege and Linux capabilities, §General form (3.3s)\n"
+ },
+ "why does ./script.sh give permission denied but bash script.sh works": {
+  "ans": "The error occurs because `./script.sh` lacks the execute permission bit, whereas `bash script.sh` has it set.",
+  "err": "unix.stackexchange.com_en_all_2026-02 · Run ./script.sh vs bash script.sh - permission denied · §Filesystem mounted with noexec option, §Incorrect POSIX permissions, §1 Answers 1, §6 Answers 6 (7.0s)\n"
+ },
+ "ssh gives connection refused what does that mean": {
+  "ans": "Connection refused indicates that the server is not accepting connections, typically due to an open port conflict or a firewall blocking the specific port.",
+  "err": "unix.stackexchange.com_en_all_2026-02 · ssh Connection refused: how to troubleshoot? · §5 Answers 5, §2 Answers 2, §(lead) (5.4s)\n"
+ },
+ "how do I find out which processes are preventing unmounting of a device": {
+  "ans": "lsof | grep works better for finding processes using a mountpoint than fuser -mv, which dumps unrelated processes.",
+  "err": "unix.stackexchange.com_en_all_2026-02 · How do I find out which processes are preventing unmounting of a device? · §8 Answers 8, §inotify watches (Linux), §1 Answers 1, §Reserved blocks, §External journal device (4.8s)\n"
+ },
+ "bash syntax error near unexpected token done": {
+  "ans": "The error indicates a missing trailing quote mark in the `done` command, which is likely caused by running the script through `dos2unix`.",
+  "err": "unix.stackexchange.com_en_all_2026-02 · Bash : syntax error near unexpected token &apos; done &apos; · §Linked, §1 Answers 1, §4 Answers 4, §Generate chromosome FASTA with output files \"$d/${ID} ${c} ${h}.fna.gz\", §1 Answers 1 (4.3s)\n"
+ },
+ "what does exit code 127 mean": {
+  "ans": "Exit code 127 typically indicates a shell command failed due to an error or permission issue, often resulting in the message \"command not found\" or \"permission denied.\"",
+  "err": "unix.stackexchange.com_en_all_2026-02 · service: Start request repeated too quickly. (code=exited, status=127) · §Linked, §(lead), §4 Answers 4 (6.7s)\n"
+ },
+ "ssh says host key verification failed what do I do": {
+  "ans": "not found",
+  "err": "unix.stackexchange.com_en_all_2026-02 · &quot;Host key verification failed&quot; even with removed ~/.ssh/known_hosts · §3 Answers 3, §(lead), §1 Answers 1 (8.3s)\ntny: rejected — command not in reference: echo\n     the library has:\n       The Guide to Online Anonymity      28 MB  tny --corpus add anonymousplanet.org_en_all\n       Nicky Case                        607 MB  tny --corpus add ncase.me_en_all\n       Noted.lol                         2.4 GB  tny --corpus add noted.lol_en_all\n"
+ },
+ "disk space not freed after deleting a large log file": {
+  "ans": "1. Check inode count and block count with `tune2fs -l` to identify if the deletion caused a process to open the file, which prevents space from being freed.",
+  "err": "unix.stackexchange.com_en_all_2026-02 · Disk space is not freed up when deleting files on a hard drive · §3 Answers 3, §Linked, §1 Answers 1, §1 Answers 1, §Linked (6.0s)\n"
+ },
+ "rm gives argument list too long": {
+  "ans": "The error occurs because the `rm` command interprets the entire argument list as a single option, which exceeds its limit. To resolve this, use the `-r` flag to treat the arguments as separate options or escape special characters in filenames using quotes.",
+  "err": "unix.stackexchange.com_en_all_2026-02 · Delete files specified by the output of find: rm thinks argument list is too long. · §2 Answers 2, §4 Answers 4, §5 Answers 5 (8.6s)\n"
+ },
+ "no space left on device but there is plenty of free space": {
+  "ans": "The error occurs when the device mapper takes more space than available, causing the system to report \"no space left\" despite having plenty of free space.",
+  "err": "unix.stackexchange.com_en_all_2026-02 · No space left on device, with 320 GB free · §Linked, §4 Answers 4, §1 Answers 1 (12.4s)\n"
+ },
+ "command not found even though the program is installed and in my path": {
+  "ans": "The error indicates that while the program exists in your PATH, it is not recognized by the shell or interpreter executing the command.",
+  "err": "unix.stackexchange.com_en_all_2026-02 · Why is program not found in PATH · §1 Answers 1, §2 Answers 2, §(lead) (7.1s)\n"
+ },
+ "what is the difference between symbolic and hard links": {
+  "ans": "",
+  "err": "tny: that compares two topics — ask about one:\n  · Symbolic link\n  · Hard link\n"
+ },
+ "why do some shell scripts use exec to run commands": {
+  "ans": "exec replaces the shell in place, making the executed program a direct child of the shell's parent rather than a grandchild through the shell, which is critical for embedded systems with limited RAM.",
+  "err": "unix.stackexchange.com_en_all_2026-02 · Why do some Linux shell scripts use exec to run commands? · §1 Answers 1, §3 Answers 3, §Redirection while running an interactive shell, §Redirection of command output to a log file (6.6s)\n"
+ },
+ "what is wrong with parsing the output of ls": {
+  "ans": "Parsing `ls` output can be risky due to varying file formats and potential errors, so it is better to use tools like `find` or `grep` instead.",
+  "err": "unix.stackexchange.com_en_all_2026-02 · What is wrong with parsing the ls command ? · §Linked, §4 Answers 4, §Oh Yeah! What About Parsing ls Output?, §OUTPUT: (6.2s)\n"
+ },
+ "what is the difference between SIGTERM and SIGKILL": {
+  "ans": "",
+  "err": "tny: that compares two topics — ask about one:\n  · SIGTERM\n  · SIGKILL\n"
+ },
+ "how many moons does jupiter have": {
+  "ans": "Jupiter has 99 known moons, but only 2% of its total mass is required to explain them, suggesting several generations of satellites may exist.",
+  "err": "wikipedia_en_top_nopic_2026-06 · Moons of Jupiter · §Origin and evolution, §Irregular satellites, §Context and implications, §Gravitational constant, §1 Answers 1 (28.9s)\n"
+ },
+ "how fast can a cheetah run": {
+  "ans": "The highest reliably reported running speed for a cheetah is 104 km/h (65 mph).",
+  "err": "wikipedia_en_top_nopic_2026-06 · Cheetah · §Speed and acceleration, §Internal anatomy, §1 Answers 1, §Linked, §3 Answers 3, §Linked (27.8s)\n"
+ },
+ "how tall is mount kilimanjaro": {
+  "ans": "19,710 feet high.",
+  "err": "wikipedia_en_top_nopic_2026-06 · Mount Kilimanjaro · §Toponymy, §In literature and media, §Symbolism and mythology, §Routes to the summit, §Mountaineering, §Etymology (26.4s)\n"
+ },
+ "when did the berlin wall fall": {
+  "ans": "The Berlin Wall fell on November 9, 1989.",
+  "err": "wikipedia_en_top_nopic_2026-06 · Fall of the Berlin Wall · §20th anniversary celebrations, §Official demolition, §Fall, §Start of the construction (1961), §1 Answers 1 (9.0s)\n"
+ },
+ "what is the chemical formula of table salt": {
+  "ans": "Table salt is chemically defined as sodium chloride (NaCl).",
+  "err": "wikipedia_en_top_nopic_2026-06 · Chemical compound · §Definitions, §Molecules, §3 Answers 3, §4 Answers 4 (20.5s)\n"
+ },
+ "who discovered penicillin": {
+  "ans": "Alexander Fleming discovered penicillin in 1928.",
+  "err": "wikipedia_en_top_nopic_2026-06 · Penicillin · §Resistance, §Penicillin units, §Experiment, §Medical use and mass production, §2 Answers 2 (19.9s)\n"
+ },
+ "who painted the mona lisa": {
+  "ans": "Leonardo da Vinci painted the Mona Lisa.",
+  "err": "wikipedia_en_top_nopic_2026-06 · Mona Lisa · §Refuge, theft, and vandalism, §Description, §Mona Lisa, §Journals, §Legacy, §Verrocchio's workshop (27.0s)\n"
+ },
+ "how long is a marathon race": {
+  "ans": "A marathon race lasts approximately 26.2 miles (42.195 kilometers).",
+  "err": "wikipedia_en_top_nopic_2026-06 · Marathon · §Marathon races, §Multiple marathons, §Notes and references, §Fuel, §(lead) (34.8s)\n"
+ },
+ "how does photosynthesis work": {
+  "ans": "Photosynthesis works exactly by using light energy to convert carbon dioxide and water into glucose and oxygen, a process that evolved once in the common ancestor of cyanobacteria.",
+  "err": "wikipedia_en_top_nopic_2026-06 · Photosynthesis · §Cyanobacteria and the evolution of photosynthesis, §Overview, §1 Answers 1, §3 Answers 3, §Linked (26.2s)\n"
+ },
+ "what causes ocean tides": {
+  "ans": "Oceanic tides are primarily driven by the Moon's gravitational tidal forces upon the Earth, though they are also substantially modulated by the Sun's tidal forces, the rotation of the Earth, and the shape of rocky continents.",
+  "err": "wikipedia_en_top_nopic_2026-06 · Ocean · §Tides, §Types of ocean currents, §History of tidal theory, §Amplitude and cycle time, §Dynamic theory, §Classical era (35.5s)\n"
+ },
+ "why is the sky blue": {
+  "ans": "Rayleigh scattering occurs when sunlight passes through the atmosphere, causing blue wavelengths to be scattered more widely by oxygen and nitrogen molecules than red wavelengths, which results in the sky appearing blue.",
+  "err": "wikipedia_en_top_nopic_2026-06 · Sky Blue Sky · §Release and reception, §Composition, §Sky and sea, §Artificial blues, §Applications of blue sky catastrophe in other fields, §Orbital dynamics (33.4s)\n"
+ },
+ "what is plate tectonics": {
+  "ans": "Plate tectonics is a model of Earth's lithosphere that explains the movement of tectonic plates through the interaction of mantle convection and gravity-driven forces, often driven by tidal effects.",
+  "err": "wikipedia_en_physics_nopic_2026-07 · Plate tectonics · §Possible tidal effect on plate tectonics, §Emergence of plate tectonics and past plate motions, §Possible tidal effect on plate tectonics, §Emergence of plate tectonics and past plate motions, §GPlates Python Binding, §GPlately (13.7s)\n"
+ },
+ "how does a vaccine produce immunity": {
+  "ans": "Vaccines produce immunity through two primary mechanisms: the host's immune system recognizes and responds to specific antigens presented by the vaccine, leading to the production of antibodies or T-cells that neutralize pathogens or clear infected cells.",
+  "err": "wikipedia_en_top_nopic_2026-06 · Vaccine · §Limitations, §Genetic vaccine, §1 Answers 1, §Disadvantages, §Types (15.4s)\n"
+ },
+ "how do you perform CPR on an adult": {
+  "ans": "Standard CPR is performed with the victim in a supine position, while prone CPR involves turning the head to the side to reduce aspiration risk.",
+  "err": "biology.stackexchange.com_en_all_2026-02 · Is hands-only CPR as effective as traditional CPR? · §2 Answers 2, §Rate and rhythm, §Medical uses, §Chance of receiving CPR, §Prone CPR (28.2s)\n"
+ },
+ "how do you make compost at home": {
+  "ans": "Compost can be made at home by using traditional methods such as line tamale baskets or steam other foods, while modern techniques like aerated static-pile composting (ASP) use forced aeration to keep material aerobic without physical manipulation.",
+  "err": "wikipedia_en_top_nopic_2026-06 · Compost · §Pathogen removal, §Aerated static-pile composting, §1 Answers 1, §(lead) (37.6s)\n"
+ },
+ "how do I propagate a plant from cuttings": {
+  "ans": "not found",
+  "err": "wikipedia_en_100_2026-07 · Plant · §Ornamental plants, §Plant cells, §Amazonian coca, §Description, §Difficulty of production planning, §Solution methods (31.0s)\ntny: rejected — how-to answer names no command from the reference\n     the library has:\n       TED plants                        657 MB  tny --corpus add ted_mul_plants\n"
  }
 }
