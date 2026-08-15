@@ -13,7 +13,7 @@ mod retrieve;
 
 use ground::{command_vocab, html2txt, split_compare, ungrounded, ungrounded_detail, ungrounded_shape};
 use retrieve::{article, pick_sections, prep, rank_articles, search_union, select_terms};
-use std::io::{IsTerminal, Write};
+use std::io::{IsTerminal, Read, Write};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
@@ -157,28 +157,30 @@ fn config(verbose: bool, rank_only: bool, dump: bool, context: bool) -> Result<C
     let home = std::env::var("HOME").map_err(|_| "HOME is not set")?;
     let xdg_data = std::env::var("XDG_DATA_HOME").unwrap_or(format!("{home}/.local/share"));
     let xdg_cache = std::env::var("XDG_CACHE_HOME").unwrap_or(format!("{home}/.cache"));
-    // a checked-out repo has ./zim and ./models; otherwise use XDG
-    let local = |name: &str, fallback: String| -> PathBuf {
-        let here = PathBuf::from(name);
-        if here.is_dir() {
-            here
-        } else {
-            PathBuf::from(fallback)
-        }
-    };
+    // F77: the corpus location must not depend on where the user is standing. This used to
+    // prefer `./zim` and `./models` when they existed, so the same question answered from a
+    // checked-out repo and from $HOME searched different libraries — "no local corpus matched
+    // (2 mounted)" in one directory and a correct answer in another. One fixed place, and
+    // TNY_ZIM/TNY_MODELS for the cases that genuinely need another (the benchmarks, a corpus
+    // on external disk). ZIMs run to gigabytes and models to hundreds of megabytes, so they
+    // live under XDG *data*, not config; `~/.cache/tny` keeps only what is regenerable.
     let cache = PathBuf::from(format!("{xdg_cache}/tny"));
     std::fs::create_dir_all(&cache).map_err(|e| format!("cannot create {}: {e}", cache.display()))?;
     Ok(Cfg {
         chat: std::env::var("TNY_CHAT").unwrap_or(format!("http://127.0.0.1:{CHAT_PORT}")),
         kiwix: std::env::var("TNY_KIWIX").unwrap_or(format!("http://127.0.0.1:{KIWIX_PORT}")),
-        zim: std::env::var("TNY_ZIM").map(PathBuf::from).unwrap_or_else(|_| local("zim", format!("{xdg_data}/tny/zim"))),
-        models: std::env::var("TNY_MODELS").map(PathBuf::from).unwrap_or_else(|_| local("models", format!("{xdg_data}/tny/models"))),
+        zim: env_path("TNY_ZIM", format!("{xdg_data}/tny/zim")),
+        models: env_path("TNY_MODELS", format!("{xdg_data}/tny/models")),
         cache,
         verbose,
         rank_only,
         dump,
         context,
     })
+}
+
+fn env_path(var: &str, fallback: String) -> PathBuf {
+    std::env::var(var).map(PathBuf::from).unwrap_or_else(|_| PathBuf::from(fallback))
 }
 
 // ------------------------------------------------------------------ corpus commands
@@ -319,6 +321,7 @@ struct Source {
 enum Next {
     Ask(String, bool),
     Open(usize),
+    Again,
     Quit,
 }
 
@@ -342,6 +345,7 @@ fn run(cfg: &Cfg, question: &str, follow: bool) -> Result<i32, String> {
         loop {
             match prompt(&sources)? {
                 Next::Quit => return Ok(code),
+                Next::Again => continue,
                 Next::Open(i) => open_source(cfg, &sources, i),
                 Next::Ask(text, f) => {
                     q = text;
@@ -353,30 +357,73 @@ fn run(cfg: &Cfg, question: &str, follow: bool) -> Result<i32, String> {
     }
 }
 
+/// One keypress, not a line: `q` must quit on the key, not on the key plus Enter. `stty` is
+/// POSIX and tny already shells out to two servers, so this costs no raw-mode dependency.
+/// `-isig` rather than plain `-icanon` matters: with signals left on, a Ctrl-C during the read
+/// would kill the process with echo still off and leave the user's shell unusable. Instead
+/// Ctrl-C arrives as a byte we handle, and the terminal is always restored by the line below.
+fn key() -> Option<u8> {
+    let tty = |args: &[&str]| {
+        Command::new("stty").args(args).stdin(Stdio::inherit()).output().ok()
+    };
+    let saved = tty(&["-g"])?;
+    let saved = String::from_utf8_lossy(&saved.stdout).trim().to_string();
+    tty(&["-icanon", "-echo", "-isig", "min", "1", "time", "0"])?;
+    let mut b = [0u8; 1];
+    let n = std::io::stdin().read(&mut b).unwrap_or(0);
+    tty(&[&saved]);
+    (n == 1).then_some(b[0])
+}
+
 fn prompt(sources: &[Source]) -> Result<Next, String> {
-    let extra = if sources.len() > 1 { format!(" (o2–o{})", sources.len()) } else { String::new() };
-    eprint!("\x1b[2m  ▸ follow-up · n new topic · o open source{extra} · q quit\x1b[0m\n> ");
+    let open = if sources.len() > 1 { format!("1-{} open", sources.len()) } else { "1 open".into() };
+    eprint!("\x1b[2m  ▸ ask a follow-up · n new topic · {open} · q quit\x1b[0m\n> ");
     std::io::stderr().flush().ok();
-    let mut line = String::new();
-    // EOF (Ctrl-D) is a quit, not an error.
-    if std::io::stdin().read_line(&mut line).map_err(|e| e.to_string())? == 0 {
-        eprintln!();
-        return Ok(Next::Quit);
-    }
-    let line = line.trim();
-    Ok(match line {
-        "" => Next::Open(usize::MAX), // no-op: re-prompt rather than punish a stray Enter
-        "q" | "quit" | "exit" => Next::Quit,
-        "o" | "o1" => Next::Open(0),
-        s if s.len() == 2 && s.starts_with('o') && s[1..].parse::<usize>().is_ok() => {
-            Next::Open(s[1..].parse::<usize>().unwrap_or(1) - 1)
+    // No stty means no single-key mode; one answer and out beats a broken terminal.
+    let Some(k) = key() else { return Ok(Next::Quit) };
+    Ok(match k {
+        b'q' | 3 | 4 | 27 => {
+            eprintln!();
+            Next::Quit
         }
-        // A follow-up carries the previous turn (F29); `n` drops it, for when the subject
-        // changes and the old question would only poison the retrieval query.
-        s if s == "n" => Next::Ask(String::new(), false),
-        s if let Some(rest) = s.strip_prefix("n ") => Next::Ask(rest.to_string(), false),
-        s => Next::Ask(s.to_string(), true),
+        b'1'..=b'9' => {
+            eprintln!();
+            Next::Open((k - b'1') as usize)
+        }
+        b'\r' | b'\n' => Next::Again,
+        // F29: a follow-up carries the previous turn into the retrieval query; `n` drops it,
+        // for when the subject changes and the old question would only poison the search.
+        b'n' => {
+            eprint!("\x1b[2m new topic\x1b[0m\n> ");
+            std::io::stderr().flush().ok();
+            match line()? {
+                Some(q) => Next::Ask(q, false),
+                None => Next::Quit,
+            }
+        }
+        // Any other key is the first character of a question. Raw mode ate it, so echo it and
+        // read the rest cooked - Backspace and the shell's line editing then work as usual.
+        c if c.is_ascii_graphic() || c == b' ' => {
+            eprint!("{}", c as char);
+            std::io::stderr().flush().ok();
+            match line()? {
+                Some(rest) => Next::Ask(format!("{}{rest}", c as char), true),
+                None => Next::Quit,
+            }
+        }
+        _ => Next::Again,
     })
+}
+
+/// The rest of a typed line. `None` is EOF, which is a quit rather than an error.
+fn line() -> Result<Option<String>, String> {
+    let mut s = String::new();
+    if std::io::stdin().read_line(&mut s).map_err(|e| e.to_string())? == 0 {
+        eprintln!();
+        return Ok(None);
+    }
+    let s = s.trim().to_string();
+    Ok(if s.is_empty() { None } else { Some(s) })
 }
 
 /// The corpora are already served over HTTP by kiwix-serve, so "open the source" is a URL the
@@ -612,9 +659,11 @@ fn answer_once(cfg: &Cfg, question: &str, follow: bool) -> Result<(i32, Vec<Sour
     // article that was not where the answer came from, and six section names that mean
     // something only to whoever wrote the ranker. What a reader needs is which works were
     // consulted; sections are diagnostics and moved behind `-v`.
+    // Numbered, because the prompt underneath opens them by number.
     let cite: Vec<String> = sources
         .iter()
-        .map(|s| format!("{} · {}", human_book(&s.book), s.title))
+        .enumerate()
+        .map(|(i, s)| format!("{} {} · {}", i + 1, human_book(&s.book), s.title))
         .collect();
     eprintln!("\n\x1b[2m  {}   {:.1}s\x1b[0m", cite.join("\n  "), t_all.elapsed().as_secs_f64());
     save_turn(cfg, question, &answer);

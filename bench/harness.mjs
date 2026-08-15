@@ -3,7 +3,7 @@
 //   bun bench/harness.mjs [rank|judge|sections|answers|corpus|thinking|all]
 //
 // Requires three servers (see NOTES.md "Environment"):
-//   kiwix-serve  --port 8082 ... zim/*.zim
+//   kiwix-serve  --port 8082 ... ~/.local/share/tny/zim/*.zim
 //   llama-server -hf ggml-org/Qwen3.5-0.8B-GGUF:Q8_0 --jinja --port 8080
 //   llama-server -hf ggml-org/bge-small-en-v1.5-Q8_0-GGUF --embeddings --pooling cls --port 8084
 

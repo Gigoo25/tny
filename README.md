@@ -11,14 +11,17 @@ Not built yet. This repo currently holds the measurements that decide how to bui
 
 ## Reproducing
 
-Needs three servers (see `NOTES.md` → Environment). Model weights and ZIM corpora are
-gitignored; `llama-server -hf` and `tny --corpus` refetch them.
+Needs three servers (see `NOTES.md` → Environment). Model weights and ZIM corpora live
+outside the repo, under `${XDG_DATA_HOME:-~/.local/share}/tny/` — one fixed location, so a
+question answers the same from any directory (F77). `llama-server -hf` and `tny --corpus`
+fetch them there.
 
 ```sh
 nix-shell -p llama-cpp kiwix-tools
-export LLAMA_CACHE=$PWD/models
+export TNY=${XDG_DATA_HOME:-~/.local/share}/tny
+export LLAMA_CACHE=$TNY/models
 
-kiwix-serve --port 8082 --address 127.0.0.1 zim/*.zim
+kiwix-serve --port 8082 --address 127.0.0.1 $TNY/zim/*.zim
 llama-server -hf ggml-org/Qwen3.5-0.8B-GGUF:Q8_0 --no-mmproj -t 4 -c 8192 --jinja --port 8080
 llama-server -hf ggml-org/bge-small-en-v1.5-Q8_0-GGUF --embeddings --pooling cls -c 512 -t 4 --port 8084
 

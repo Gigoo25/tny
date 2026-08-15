@@ -157,11 +157,20 @@ Never `stackoverflow.com_en_all` (**80.5 GB**) by default. Catalog:
 `library.kiwix.org/catalog/v2/entries?lang=eng&count=-1`; download links arrive as
 `.zim.meta4` — strip `.meta4`.
 
-## Caches — `${XDG_CACHE_HOME:-~/.cache}/tny/`
+## Storage
+
+`${XDG_DATA_HOME:-~/.local/share}/tny/` — one fixed location, never the working directory
+(F77: preferring `./zim` when it existed made the same question answer differently depending
+on where the user stood).
 
 ```
 zim/          ZIM files (managed by `tny --corpus`)
 models/       LLAMA_CACHE for both GGUFs
+```
+
+`${XDG_CACHE_HOME:-~/.cache}/tny/` — only what is regenerable.
+
+```
 books.json    book id, _ftindex flag, article count (from the local catalog)
 ```
 
