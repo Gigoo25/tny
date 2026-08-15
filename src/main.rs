@@ -84,6 +84,8 @@ struct Cfg {
     /// Print the exact text handed to the model and stop, without loading it. Answers the
     /// only question that separates a retrieval failure from a model failure (F67).
     context: bool,
+    /// Skip the answer cache for this question and replace what is in it.
+    fresh: bool,
 }
 
 fn main() {
@@ -92,6 +94,7 @@ fn main() {
     let mut rank_only = false;
     let mut dump = false;
     let mut context = false;
+    let mut fresh = false;
     let mut follow = false;
     let mut corpus_args: Option<Vec<String>> = None;
     let mut args = std::env::args().skip(1);
@@ -101,6 +104,7 @@ fn main() {
             "--rank" => rank_only = true,
             "--dump" => dump = true,
             "--context" => context = true,
+            "--fresh" => fresh = true,
             "-f" | "--follow" => follow = true,
             "--corpus" => corpus_args = Some(args.by_ref().collect()),
             "-h" | "--help" => {
@@ -120,7 +124,7 @@ fn main() {
         }
     }
 
-    let cfg = match config(verbose, rank_only, dump, context) {
+    let cfg = match config(verbose, rank_only, dump, context, fresh) {
         Ok(c) => c,
         Err(e) => {
             eprintln!("tny: {e}");
@@ -150,6 +154,7 @@ fn usage() {
         "tny \"question\"               grounded answer from local ZIM corpora\n\
          \n\
            -f, --follow               treat this as a follow-up to the last question\n\
+               --fresh                re-answer instead of reusing the cached answer\n\
            -v, --verbose              per-stage timings on stderr\n\
          \n\
          tny --corpus list            mounted ZIM files\n\
@@ -162,7 +167,7 @@ fn usage() {
     );
 }
 
-fn config(verbose: bool, rank_only: bool, dump: bool, context: bool) -> Result<Cfg, String> {
+fn config(verbose: bool, rank_only: bool, dump: bool, context: bool, fresh: bool) -> Result<Cfg, String> {
     let home = std::env::var("HOME").map_err(|_| "HOME is not set")?;
     let xdg_data = std::env::var("XDG_DATA_HOME").unwrap_or(format!("{home}/.local/share"));
     let xdg_cache = std::env::var("XDG_CACHE_HOME").unwrap_or(format!("{home}/.cache"));
@@ -185,6 +190,7 @@ fn config(verbose: bool, rank_only: bool, dump: bool, context: bool) -> Result<C
         rank_only,
         dump,
         context,
+        fresh,
     })
 }
 
@@ -455,33 +461,47 @@ fn answer_once(cfg: &Cfg, question: &str, follow: bool) -> Result<(i32, Vec<Sour
     let mut spin = Spin::start(std::io::stderr().is_terminal() && !quiet, "starting the library");
     serve_kiwix(cfg)?;
 
-    let prev = if follow { last_turn(cfg) } else { None };
+    let prev = if follow { recent_turns(cfg, 2) } else { Vec::new() };
+    // F85: a repeat costs a file read instead of 40 s. The key includes the turn being
+    // followed, so the same words after a different question are a different question.
+    let key = cache_key(cfg, question, prev.last());
+    if !cfg.fresh && !cfg.rank_only && !cfg.dump && !cfg.context {
+        if let Some((answer, sources)) = cached(cfg, &key) {
+            spin.stop();
+            println!("{answer}");
+            eprintln!("\n\x1b[2m  {}   cached\x1b[0m", cite_lines(&sources).join("\n  "));
+            save_turn(cfg, question, &answer);
+            return Ok((0, sources));
+        }
+    }
     // F29: the retrieval query is `<prev question> <this question>`. NEVER a model rewrite:
     // asked to rephrase, 0.8B inverted "how do I turn it off" into "how do I turn it back
-    // on". Concatenation scored 5/6 against the rewrite's 4/6, and it is free.
-    let retrieval_q = match &prev {
+    // on". Concatenation scored 5/6 against the rewrite's 4/6, and it is free. Only the
+    // immediately previous question joins it — F84 widened the model's history, not this.
+    let retrieval_q = match prev.last() {
         Some((q, _)) => format!("{q} {question}"),
         None => question.to_string(),
     };
 
-    // F37: a comparison question has no single source article, and synthesis from two is
-    // unreliable (2/5 — the model invents the side it was not shown). The split is
-    // model-free, both names coming from the question's own grammar, and it must run BEFORE
-    // `prep`, which strips the very words it needs. Fires 6/6, silent on 26/26.
+    // F37 measured synthesis from two topics at 2/5 and made comparisons refuse: "ask about
+    // one". But the failure it recorded was the model inventing *the side it was not shown* —
+    // a context bug, not a reasoning limit, because retrieval returned one article for a
+    // two-sided question. F86 shows both sides instead of refusing. The split is model-free,
+    // both names coming from the question's own grammar, and it must run BEFORE `prep`, which
+    // strips the very words it needs. Fires 6/6, silent on 26/26.
     let books = corpus::local(&cfg.zim);
-    if let Some((a, b)) = split_compare(&retrieval_q) {
+    let compare = split_compare(&retrieval_q).and_then(|(a, b)| {
         let one = |s: &str| {
             let c = search_union(&cfg.kiwix, &prep(s), &books, PER_BOOK);
             rank_articles(s, &c).into_iter().next()
         };
-        let (ha, hb) = (one(&a), one(&b));
-        if let (Some(x), Some(y)) = (ha.as_ref(), hb.as_ref()) {
-            if x.title != y.title {
-                eprintln!("tny: that compares two topics — ask about one:\n  · {}\n  · {}", x.title, y.title);
-                return Ok((2, vec![]));
-            }
+        match (one(&a), one(&b)) {
+            // Both sides landing on one article is not a comparison — "SIGTERM vs SIGKILL"
+            // is answered by the signals page, and splitting it would read it twice.
+            (Some(x), Some(y)) if x.title != y.title => Some(vec![x, y]),
+            _ => None,
         }
-    }
+    });
 
     let t = Instant::now();
     // F68: a sentence is not a search query. kiwix scores 0 hits at 24 terms, so the query is
@@ -532,7 +552,12 @@ fn answer_once(cfg: &Cfg, question: &str, follow: bool) -> Result<(i32, Vec<Sour
         spin.stop();
         return Ok((no_local_match(cfg, &query), vec![]));
     }
-    let ranked = rank_articles(&retrieval_q, &cands);
+    // A comparison replaces the shortlist with one article per side, so the model is shown
+    // both things it is being asked to compare rather than one and its own imagination.
+    let ranked = match compare {
+        Some(pair) => pair,
+        None => rank_articles(&retrieval_q, &cands),
+    };
     // Retrieval is 2 % of a query's wall time, so measuring ranking through full generation
     // costs 80 s per case and hides the thing under test. `--rank` stops here and prints the
     // whole shortlist, because rank-1 alone cannot distinguish a scoring miss from a
@@ -614,7 +639,7 @@ fn answer_once(cfg: &Cfg, question: &str, follow: bool) -> Result<(i32, Vec<Sour
 
     spin.say("answering");
     let t = Instant::now();
-    let answer = ask(cfg, question, &picked.text, prev.as_ref())?;
+    let answer = ask(cfg, question, &picked.text, &prev)?;
     let t_gen = t.elapsed();
 
     // F27/F44/F45: three rules, each with its own reference. A false reject is the worst
@@ -629,10 +654,13 @@ fn answer_once(cfg: &Cfg, question: &str, follow: bool) -> Result<(i32, Vec<Sour
     .find(|r| !r.is_empty())
     .unwrap_or_default();
 
-    // The sources the answer was actually built from — the caller offers to open them, and
-    // the model saw all three, so citing only rank 1 would credit the wrong article.
-    let sources: Vec<Source> = docs
-        .iter()
+    // F83: cite the articles the answer came from, not every article that was read. Three go
+    // into context and "why is the sky blue" credited `Sky Blue Sky`, a Wilco album, because
+    // it ranked first — the answer came from the other two. An article earns its line by
+    // containing the answer's distinctive words: the same evidence the grounding check uses,
+    // applied per article instead of to the union of all three.
+    let sources: Vec<Source> = supporting(&answer, &docs)
+        .into_iter()
         .map(|(c, _)| Source {
             book: c.book.clone(),
             path: c.path.clone(),
@@ -669,14 +697,54 @@ fn answer_once(cfg: &Cfg, question: &str, follow: bool) -> Result<(i32, Vec<Sour
     // something only to whoever wrote the ranker. What a reader needs is which works were
     // consulted; sections are diagnostics and moved behind `-v`.
     // Numbered, because the prompt underneath opens them by number.
-    let cite: Vec<String> = sources
+    eprintln!(
+        "\n\x1b[2m  {}   {:.1}s\x1b[0m",
+        cite_lines(&sources).join("\n  "),
+        t_all.elapsed().as_secs_f64()
+    );
+    save_turn(cfg, question, &answer);
+    cache_put(cfg, &key, answer.trim(), &sources);
+    Ok((0, sources))
+}
+
+fn cite_lines(sources: &[Source]) -> Vec<String> {
+    sources
         .iter()
         .enumerate()
         .map(|(i, s)| format!("{} {} · {}", i + 1, human_book(&s.book), s.title))
+        .collect()
+}
+
+/// Which of the read articles actually support this answer. Distinctive words only — short
+/// and common ones match everywhere and would put every article back on the list. An article
+/// is kept when it carries most of what the best one carries, so a fact stated in two
+/// articles cites both, and the Wilco album cites nothing.
+fn supporting<'a>(
+    answer: &str,
+    docs: &'a [(&'a retrieve::Candidate, String)],
+) -> Vec<&'a (&'a retrieve::Candidate, String)> {
+    let words: Vec<String> = answer
+        .to_lowercase()
+        .split(|c: char| !c.is_alphanumeric() && c != '-')
+        .filter(|w| w.len() >= 5)
+        .map(str::to_string)
         .collect();
-    eprintln!("\n\x1b[2m  {}   {:.1}s\x1b[0m", cite.join("\n  "), t_all.elapsed().as_secs_f64());
-    save_turn(cfg, question, &answer);
-    Ok((0, sources))
+    if words.is_empty() || docs.len() < 2 {
+        return docs.iter().collect();
+    }
+    let share = |html: &str| {
+        let text = html2txt(html).to_lowercase();
+        words.iter().filter(|w| text.contains(w.as_str())).count() as f64 / words.len() as f64
+    };
+    let scored: Vec<(f64, &(&retrieve::Candidate, String))> =
+        docs.iter().map(|d| (share(&d.1), d)).collect();
+    let best = scored.iter().map(|(s, _)| *s).fold(0.0, f64::max);
+    // Nothing matched anywhere: the answer is odd, so name everything read rather than
+    // silently citing nothing.
+    if best <= 0.0 {
+        return docs.iter().collect();
+    }
+    scored.into_iter().filter(|(s, _)| *s >= best * 0.8).map(|(_, d)| d).collect()
 }
 
 /// F40/F57: the catalog is the index — 1,286 English ZIMs, cached locally at 1.5 MB, so a
@@ -710,12 +778,14 @@ fn no_local_match(cfg: &Cfg, query: &str) -> i32 {
     3
 }
 
-fn ask(cfg: &Cfg, question: &str, reference: &str, prev: Option<&(String, String)>) -> Result<String, String> {
+fn ask(cfg: &Cfg, question: &str, reference: &str, prev: &[(String, String)]) -> Result<String, String> {
     let mut messages = vec![serde_json::json!({ "role": "system", "content": SYS })];
-    // F28: keep the prior turn in the message list. History carries the antecedent for
+    // F28: keep the prior turns in the message list. History carries the antecedent for
     // elliptical follow-ups ("how do I unlock *it* at boot") — 83 % vs 75 % stateless — and
     // it is cheaper than it looks, because turn 1's prefix is still in the KV cache.
-    if let Some((q, a)) = prev {
+    // F84: two exchanges rather than one, so a thread's third question can still see its
+    // first. Not more: every turn is prefill, and prefill is 85 % of the answer.
+    for (q, a) in prev {
         messages.push(serde_json::json!({ "role": "user", "content": q }));
         messages.push(serde_json::json!({ "role": "assistant", "content": a }));
     }
@@ -853,15 +923,104 @@ fn wait_up(url: &str, secs: u64, what: &str) -> Result<(), String> {
     Err(format!("{what} did not come up within {secs}s — see the log in the tny cache dir"))
 }
 
-fn last_turn(cfg: &Cfg) -> Option<(String, String)> {
-    let raw = std::fs::read_to_string(cfg.cache.join("last.json")).ok()?;
-    let j: serde_json::Value = serde_json::from_str(&raw).ok()?;
-    Some((j["q"].as_str()?.to_string(), j["a"].as_str()?.to_string()))
+/// F84: the conversation is more than one turn deep. `last.json` kept exactly one exchange,
+/// so the third question in a thread could not see the first. Five is a rolling window, not a
+/// transcript: the retrieval query still concatenates only the previous question (F29, which
+/// was measured), while the model gets the last two exchanges for pronouns and continuity.
+fn recent_turns(cfg: &Cfg, n: usize) -> Vec<(String, String)> {
+    let raw = std::fs::read_to_string(cfg.cache.join("turns.json")).unwrap_or_default();
+    let j: Vec<serde_json::Value> = serde_json::from_str(&raw).unwrap_or_default();
+    j.iter()
+        .rev()
+        .take(n)
+        .rev()
+        .filter_map(|t| Some((t["q"].as_str()?.to_string(), t["a"].as_str()?.to_string())))
+        .collect()
 }
 
 fn save_turn(cfg: &Cfg, q: &str, a: &str) {
-    let j = serde_json::json!({ "q": q, "a": a });
-    if let Ok(mut f) = std::fs::File::create(cfg.cache.join("last.json")) {
-        let _ = f.write_all(j.to_string().as_bytes());
+    let mut turns = recent_turns(cfg, 4);
+    turns.push((q.to_string(), a.to_string()));
+    let j: Vec<serde_json::Value> =
+        turns.iter().map(|(q, a)| serde_json::json!({ "q": q, "a": a })).collect();
+    let _ = std::fs::write(cfg.cache.join("turns.json"), serde_json::Value::Array(j).to_string());
+}
+
+/// F85: asking the same question twice cost 40 s twice. The corpora are static files and the
+/// sampling is near-deterministic, so a repeat is a lookup. Keyed by the question and the
+/// turn it follows, because a follow-up's answer depends on what came before; `--fresh`
+/// bypasses it, and a corpus change invalidates it through the book list in the key.
+fn cache_key(cfg: &Cfg, question: &str, prev: Option<&(String, String)>) -> String {
+    let books = corpus::local(&cfg.zim).join(",");
+    let prev_q = prev.map(|(q, _)| q.as_str()).unwrap_or("");
+    format!("{}\u{0}{}\u{0}{}", question.trim().to_lowercase(), prev_q.to_lowercase(), books)
+}
+
+fn now_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+/// Thirty days. ZIM dumps are rebuilt roughly monthly and `tny --corpus` replaces them in
+/// place, so an answer that outlives its source would be quoting a page that no longer says
+/// it. The book list in the key catches an added or removed corpus; this catches a refreshed
+/// one, which keeps the same name.
+const CACHE_TTL: u64 = 30 * 24 * 60 * 60;
+
+fn cached(cfg: &Cfg, key: &str) -> Option<(String, Vec<Source>)> {
+    let raw = std::fs::read_to_string(cfg.cache.join("answers.json")).ok()?;
+    let j: serde_json::Value = serde_json::from_str(&raw).ok()?;
+    let hit = j.get(key)?;
+    if now_secs().saturating_sub(hit["at"].as_u64().unwrap_or(0)) > CACHE_TTL {
+        return None;
     }
+    let sources = hit["s"]
+        .as_array()?
+        .iter()
+        .filter_map(|s| {
+            Some(Source {
+                book: s["book"].as_str()?.to_string(),
+                path: s["path"].as_str()?.to_string(),
+                title: s["title"].as_str()?.to_string(),
+            })
+        })
+        .collect();
+    Some((hit["a"].as_str()?.to_string(), sources))
+}
+
+fn cache_put(cfg: &Cfg, key: &str, answer: &str, sources: &[Source]) {
+    let path = cfg.cache.join("answers.json");
+    let raw = std::fs::read_to_string(&path).unwrap_or_default();
+    let mut j: serde_json::Map<String, serde_json::Value> =
+        serde_json::from_str(&raw).unwrap_or_default();
+    let now = now_secs();
+    // Expire on write: nothing else ever walks this file, so the sweep belongs where it is
+    // already open. Then a cap, oldest first, for the pathological case of 200 questions in
+    // one month.
+    j.retain(|_, v| now.saturating_sub(v["at"].as_u64().unwrap_or(0)) <= CACHE_TTL);
+    while j.len() >= 200 {
+        let oldest = j
+            .iter()
+            .min_by_key(|(_, v)| v["at"].as_u64().unwrap_or(0))
+            .map(|(k, _)| k.clone());
+        match oldest {
+            Some(k) => {
+                j.remove(&k);
+            }
+            None => break,
+        }
+    }
+    j.insert(
+        key.to_string(),
+        serde_json::json!({
+            "a": answer,
+            "at": now,
+            "s": sources.iter().map(|s| serde_json::json!({
+                "book": s.book, "path": s.path, "title": s.title
+            })).collect::<Vec<_>>(),
+        }),
+    );
+    let _ = std::fs::write(path, serde_json::Value::Object(j).to_string());
 }

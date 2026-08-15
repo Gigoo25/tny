@@ -20,7 +20,9 @@ const tally = tallyOf();
 
 async function answerOf(query) {
   if (regrade) return cache[query] ?? { ans: "", err: "" };
-  const p = Bun.spawn(["./target/release/tny", query], { stdout: "pipe", stderr: "pipe" });
+  // --fresh: F85 caches answers on disk, and a benchmark that reads its own cache measures
+  // the cache. Every case here must pay the model.
+  const p = Bun.spawn(["./target/release/tny", "--fresh", query], { stdout: "pipe", stderr: "pipe" });
   const ans = (await new Response(p.stdout).text()).trim();
   const err = await new Response(p.stderr).text();
   await p.exited;
