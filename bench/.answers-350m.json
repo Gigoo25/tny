@@ -1,0 +1,234 @@
+{
+ "how do I change the hostname of my machine": {
+  "ans": "Edit /etc/hostname to include yourhostname.",
+  "err": "\n\u001b[2m  1 Arch Wiki · Network configuration\n  2 Wikipedia · Mail-11\n  3 devdocs git · git config   17.7s\u001b[0m\n"
+ },
+ "how do I enable a systemd service so it starts at boot": {
+  "ans": "Enable a systemd service by specifying the unit in the .service file, using `enable` or `disable`.",
+  "err": "\n\u001b[2m  1 Arch Wiki · Systemd\n  2 Wikipedia · Systemd\n  3 Wikipedia · Systemd   16.9s\u001b[0m\n"
+ },
+ "how do I add a new user with useradd": {
+  "ans": "Use `useradd -m -G additional_groups -s login_shell username` to create the user.",
+  "err": "\n\u001b[2m  1 Arch Wiki · Users and groups\n  2 unix.stackexchange · Cannot add user with useradd command\n  3 Arch Wiki · Buildah   15.9s\u001b[0m\n"
+ },
+ "how do I resize an ext4 filesystem": {
+  "ans": "not found",
+  "err": "tny: rejected — identifier not in reference: /dev/part/\n"
+ },
+ "how do I mount a filesystem by UUID in fstab": {
+  "ans": "Mount the filesystem using the UUID from /etc/fstab or /etc/mdadm.conf.",
+  "err": "\n\u001b[2m  1 Arch Wiki · Fstab\n  2 unix.stackexchange · Raid devices are mounted with different UUID\n  3 Wikipedia · Universally unique identifier   16.8s\u001b[0m\n"
+ },
+ "how do I enable the en_US.UTF-8 locale": {
+  "ans": "Enable the en_US.UTF-8 locale by running `locale-gen` and commenting the appropriate entries in /etc/locale.gen.",
+  "err": "\n\u001b[2m  1 Arch Wiki · Locale\n  2 devdocs postgresql · Locale Support\n  3 Wikipedia · Document type definition   17.2s\u001b[0m\n"
+ },
+ "how do I let a user run commands with sudo": {
+  "ans": "Use `sudo` to execute commands as a user, and ensure the user has administrative privileges.",
+  "err": "\n\u001b[2m  1 Arch Wiki · Sudo\n  2 Wikipedia · Sudo\n  3 devdocs python · 5. Using Python on macOS   17.1s\u001b[0m\n"
+ },
+ "how do I undo the last commit but keep my changes": {
+  "ans": "Undo commits permanently by executing `git commit --hard HEAD~3`.",
+  "err": "\n\u001b[2m  1 devdocs git · git reset\n  2 Wikipedia · Singapore\n  3 Arch Wiki · Help:Procedures   16.6s\u001b[0m\n"
+ },
+ "how do I change the message of my last commit": {
+  "ans": "not found",
+  "err": "tny: rejected — identifier not in reference: new_message\n     the library has:\n       Veganism & Vegetarianism Q&A       10 MB  tny --corpus add vegetarianism.stackexchange.com_en_all\n       Community Building Q&A              6 MB  tny --corpus add communitybuilding.stackexchange.com_en_all\n       Constructed Languages Q&A           7 MB  tny --corpus add conlang.stackexchange.com_en_all\n"
+ },
+ "how do I create a docker image tag for a registry": {
+  "ans": "Use the `docker tag` command with the hostname and port, optionally specifying the registry hostname.",
+  "err": "\n\u001b[2m  1 devdocs docker · docker tag\n  2 Arch Wiki · Docker\n  3 devdocs docker · docker push   20.1s\u001b[0m\n"
+ },
+ "how do I add a login role with a password in postgresql": {
+  "ans": "Add a login role with a password using `ALTER ROLE` and specify the authentication method as \"scram-sha-256\" for PostgreSQL.",
+  "err": "\n\u001b[2m  1 devdocs postgresql · CREATE ROLE\n  2 Arch Wiki · PostgreSQL\n  3 devdocs postgresql · ALTER ROLE   18.7s\u001b[0m\n"
+ },
+ "how do I create a virtual environment in python": {
+  "ans": "Use the `venv` module to create a virtual environment by specifying the directory path and running ` -m venv tutorial-env`.",
+  "err": "\n\u001b[2m  1 Arch Wiki · Python/Virtual environment\n  2 Arch Wiki · Python\n  3 devdocs python · 12. Virtual Environments and Packages   17.0s\u001b[0m\n"
+ },
+ "what does unwrap_or_default return on an Option": {
+  "ans": "not found",
+  "err": "tny: rejected — restates the question\n"
+ },
+ "how does bash substitute a default value if a variable is unset": {
+  "ans": "not found",
+  "err": "tny: rejected — restates the question\n     the library has:\n       Bash Docs                           1 MB  tny --corpus add devdocs_en_bash\n       DevHints - Rico's cheatsheets       4 MB  tny --corpus add devhints.io_en_all\n"
+ },
+ "what does the --oneline flag do in git log": {
+  "ans": "The --oneline flag shows the commit log message in a single line, not with tabs or indentation.",
+  "err": "\n\u001b[2m  1 devdocs git · git log\n  2 Arch Wiki · Git\n  3 devdocs git · git shortlog   16.5s\u001b[0m\n"
+ },
+ "what arguments does json.dumps take": {
+  "ans": "json.dumps takes two arguments: a JSON formatted string and optional parameters such as skipkeys, ensure_ascii, check_circular, allow_nan, cls, indent, separators, default, sort_keys, and kw.",
+  "err": "\n\u001b[2m  1 devdocs python · json\n  2 unix.stackexchange · Generating unique IDs for json content indexing\n  3 devdocs git · api trace2   23.3s\u001b[0m\n"
+ },
+ "what precision does the numeric data type have in postgresql": {
+  "ans": "The numeric data type has a precision of 8 bytes in PostgreSQL.",
+  "err": "\n\u001b[2m  1 devdocs postgresql · Numeric Types\n  2 Wikipedia · PostgreSQL\n  3 devdocs postgresql · Data Types: bigint   21.4s\u001b[0m\n"
+ },
+ "what does the --rm option do in docker run": {
+  "ans": "The --rm option allows running containers without elevated privileges.",
+  "err": "\n\u001b[2m  1 devdocs docker · docker run\n  2 Arch Wiki · Docker\n  3 devdocs docker · Docker run reference   19.8s\u001b[0m\n"
+ },
+ "why does ./script.sh give permission denied but bash script.sh works": {
+  "ans": "The ./script.sh grants read and execute permissions to the user, group, and others, while bash script.sh only requires read permissions for itself. This allows ./script.sh to run as a regular script without needing to start a new Bash process.",
+  "err": "\n\u001b[2m  1 unix.stackexchange · Run ./script.sh vs bash script.sh - permission denied\n  2 unix.stackexchange · Permission Denied If I try to execute a bash script via SSH to a remote server\n  3 unix.stackexchange · permission denied on scripts in ~/bin   18.2s\u001b[0m\n"
+ },
+ "ssh gives connection refused what does that mean": {
+  "ans": "SSH connection refused means the server is unable to establish an SSH connection.",
+  "err": "\n\u001b[2m  1 unix.stackexchange · ssh Connection refused: how to troubleshoot?\n  2 unix.stackexchange · SSH Connection Refused In CentOS?\n  3 unix.stackexchange · what would cause SSH connection refused but not refuse an immediate subsequent attempt?   14.1s\u001b[0m\n"
+ },
+ "how do I find out which processes are preventing unmounting of a device": {
+  "ans": "Use `lsof` to see which processes are using the mounted device, or enable debugging with `--debug`.",
+  "err": "\n\u001b[2m  1 unix.stackexchange · How do I find out which processes are preventing unmounting of a device?\n  2 unix.stackexchange · How to find out which process keeps an LVM partition from unmounting *during shutdown*?\n  3 Arch Wiki · Ext4   17.6s\u001b[0m\n"
+ },
+ "bash syntax error near unexpected token done": {
+  "ans": "not found",
+  "err": "tny: rejected — restates the question\n     the library has:\n       Bash Docs                           1 MB  tny --corpus add devdocs_en_bash\n       DevHints - Rico's cheatsheets       4 MB  tny --corpus add devhints.io_en_all\n       TED terrorism                     598 MB  tny --corpus add ted_mul_terrorism\n"
+ },
+ "what does exit code 127 mean": {
+  "ans": "Exit code 127 typically indicates a shell command failure, such as an error or a timeout, often due to issues like missing arguments, incorrect syntax, or permission problems.",
+  "err": "\n\u001b[2m  1 unix.stackexchange · service: Start request repeated too quickly. (code=exited, status=127)\n  2 unix.stackexchange · shell script exit status 127\n  3 unix.stackexchange · How do I get the list of exit codes (and/or return codes) and meaning for a command/utility?   15.6s\u001b[0m\n"
+ },
+ "ssh says host key verification failed what do I do": {
+  "ans": "Run the ssh command first to generate the known_hosts file.",
+  "err": "\n\u001b[2m  1 unix.stackexchange · &quot;Host key verification failed&quot; even with removed ~/.ssh/known_hosts\n  2 unix.stackexchange · Host key verification failed when using rsync in kubernetes pod\n  3 unix.stackexchange · ssh: Warning despite disabling strict host key checking   14.6s\u001b[0m\n"
+ },
+ "disk space not freed after deleting a large log file": {
+  "ans": "Disk full after deleting a large log file.",
+  "err": "\n\u001b[2m  1 unix.stackexchange · Disk space is not freed up when deleting files on a hard drive\n  2 unix.stackexchange · After deleting &quot;database-wal&quot; file from kactivitymanagerd which suddently had a size of several GBs disk space is not freed up\n  3 unix.stackexchange · Disk full after deleting large files and rebooting   15.8s\u001b[0m\n"
+ },
+ "rm gives argument list too long": {
+  "ans": "Use pipes and redirects instead of variables for large data chunks.",
+  "err": "\n\u001b[2m  1 unix.stackexchange · Delete files specified by the output of find: rm thinks argument list is too long.\n  2 unix.stackexchange · Removing multiple files with same prefix (argument list too long)\n  3 unix.stackexchange · Argument list too long error with makefile   23.1s\u001b[0m\n"
+ },
+ "no space left on device but there is plenty of free space": {
+  "ans": "Docker says \"no space left on device\" but system has plenty of space.",
+  "err": "\n\u001b[2m  1 unix.stackexchange · No space left on device, with 320 GB free\n  2 unix.stackexchange · Docker says &quot;no space left on device&quot; but, system has plenty of space?\n  3 unix.stackexchange · Diagnose on ubuntu 16 OSError: [Errno 28] No space left on device: but actually plenty of space   17.1s\u001b[0m\n"
+ },
+ "command not found even though the program is installed and in my path": {
+  "ans": "not found",
+  "err": "tny: rejected — restates the question\n     the library has:\n       XSLT & XPath Docs                   0 MB  tny --corpus add devdocs_en_xslt-xpath\n       How to Design Programs              2 MB  tny --corpus add htdp.org_en_all\n       Programming Language Design        11 MB  tny --corpus add langdev.stackexchange.com_en_all\n"
+ },
+ "what is the difference between symbolic and hard links": {
+  "ans": "",
+  "err": "tny: that compares two topics — ask about one:\n  · Symbolic link\n  · Hard link\n"
+ },
+ "why do some shell scripts use exec to run commands": {
+  "ans": "Some shell scripts use exec to run commands because it replaces the shell in place, making the executed program a direct child of the shell's parent instead of a grandchild through the shell.",
+  "err": "\n\u001b[2m  1 unix.stackexchange · Why do some Linux shell scripts use exec to run commands?\n  2 unix.stackexchange · Does running &quot;exec echo some; echo test&quot; in bash never print &quot;some test&quot;?\n  3 unix.stackexchange · exec redirects in bash   23.0s\u001b[0m\n"
+ },
+ "what is wrong with parsing the output of ls": {
+  "ans": "Parsing the output of ls can be risky due to varying formats and potential issues like hard-linked files.",
+  "err": "\n\u001b[2m  1 unix.stackexchange · What is wrong with parsing the ls command ?\n  2 unix.stackexchange · file $(ls /usr/bin/* | grep zip) command gives me errors. What&apos;s wrong?\n  3 unix.stackexchange · Why *not* parse `ls` (and what to do instead)?   15.2s\u001b[0m\n"
+ },
+ "what is the difference between SIGTERM and SIGKILL": {
+  "ans": "",
+  "err": "tny: that compares two topics — ask about one:\n  · SIGTERM\n  · SIGKILL\n"
+ },
+ "how many moons does jupiter have": {
+  "ans": "Jupiter has 115 known moons.",
+  "err": "\n\u001b[2m  1 Wikipedia · Moons of Jupiter\n  2 Wikipedia · Jupiter mass\n  3 biology.stackexchange · Why must a planet be in a star&apos;s &quot;habitable zone&quot; to have life?   10.1s\u001b[0m\n"
+ },
+ "how fast can a cheetah run": {
+  "ans": "104 km/h (65 mph)",
+  "err": "\n\u001b[2m  1 Wikipedia · Cheetah\n  2 biology.stackexchange · How fast can a human run?\n  3 biology.stackexchange · Why haven&apos;t prey evolved the ability to always outrun their predators?   10.5s\u001b[0m\n"
+ },
+ "how tall is mount kilimanjaro": {
+  "ans": "Mount Kilimanjaro is 5,895 meters (19,341 feet) tall.",
+  "err": "\n\u001b[2m  1 Wikipedia · Mount Kilimanjaro\n  2 Wikipedia · Mount Damavand\n  3 Wikipedia · Mount Elbrus   13.1s\u001b[0m\n"
+ },
+ "when did the berlin wall fall": {
+  "ans": "The Berlin Wall fell on 9 November 1989.",
+  "err": "\n\u001b[2m  1 Wikipedia · Fall of the Berlin Wall\n  2 Wikipedia · Berlin Wall\n  3 unix.stackexchange · How time zone variable for Kubernetes should look like?   10.4s\u001b[0m\n"
+ },
+ "what is the chemical formula of table salt": {
+  "ans": "Table salt has the chemical formula NaCl.",
+  "err": "\n\u001b[2m  1 Wikipedia · Chemical compound\n  2 cooking.stackexchange · Sweet = Sugar, Salty = Salt, Sour =?\n  3 cooking.stackexchange · What type of salt for sourdough bread baking?   10.7s\u001b[0m\n"
+ },
+ "who discovered penicillin": {
+  "ans": "Alexander Fleming",
+  "err": "\n\u001b[2m  1 Wikipedia · Penicillin\n  2 Wikipedia · Alexander Fleming\n  3 biology.stackexchange · How do we find antibiotics?   9.6s\u001b[0m\n"
+ },
+ "who painted the mona lisa": {
+  "ans": "Leonardo da Vinci",
+  "err": "\n\u001b[2m  1 Wikipedia · Mona Lisa\n  2 Wikipedia · Lisa del Giocondo\n  3 Wikipedia · Leonardo da Vinci   10.5s\u001b[0m\n"
+ },
+ "how long is a marathon race": {
+  "ans": "not found",
+  "err": "tny: rejected — number not in reference: 26.244\n     the library has:\n       Expatriates Q&A                    42 MB  tny --corpus add expatriates.stackexchange.com_en_all\n       Algorithms                        517 MB  tny --corpus add jeffe.cs.illinois.edu_en_all\n       Astronomy Picture of the Day      4.3 GB  tny --corpus add apod.nasa.gov_en_all\n"
+ },
+ "how does photosynthesis work": {
+  "ans": "Photosynthesis converts light energy into chemical energy in plant cells, storing it in organic compounds.",
+  "err": "\n\u001b[2m  1 Wikipedia · Photosynthesis\n  2 biology.stackexchange · How does photosynthesis work exactly?\n  3 biology.stackexchange · Is infrared photosynthesis possible?   10.3s\u001b[0m\n"
+ },
+ "what causes ocean tides": {
+  "ans": "The Moon's gravitational tidal forces, Earth's rotation, and the shape of rocky continents all contribute to ocean tides.",
+  "err": "\n\u001b[2m  1 Wikipedia · Ocean\n  2 Wikipedia · Tide\n  3 Wikipedia · Theory of tides   10.9s\u001b[0m\n"
+ },
+ "why is the sky blue": {
+  "ans": "The sky is blue due to Rayleigh scattering, where shorter wavelengths like blue are scattered more by atmospheric molecules than longer ones.",
+  "err": "\n\u001b[2m  1 Wikipedia · Sky Blue Sky\n  2 Wikipedia · Blue\n  3 Wikipedia · Blue sky catastrophe   29.3s\u001b[0m\n"
+ },
+ "what is plate tectonics": {
+  "ans": "plate tectonics is the theory that Earth's lithosphere is divided into large blocks called plates that move relative to one another due to convection currents in the mantle.",
+  "err": "\n\u001b[2m  1 Wikipedia · Plate tectonics\n  2 Wikipedia · Plate tectonics\n  3 Wikipedia · GPlates   13.2s\u001b[0m\n"
+ },
+ "how does a vaccine produce immunity": {
+  "ans": "A vaccine produces immunity by stimulating the immune system to recognize and respond to specific pathogens, often through the production of antibodies.",
+  "err": "\n\u001b[2m  1 Wikipedia · Vaccine\n  2 biology.stackexchange · Spike protein production by mRNA vaccines?\n  3 Wikipedia · Inactivated vaccine   13.9s\u001b[0m\n"
+ },
+ "how do you perform CPR on an adult": {
+  "ans": "Standard CPR is performed with the victim in supine position, compressing the back.",
+  "err": "\n\u001b[2m  1 biology.stackexchange · Is hands-only CPR as effective as traditional CPR?\n  2 Wikipedia · Electrocardiography\n  3 Wikipedia · Cardiopulmonary resuscitation   14.1s\u001b[0m\n"
+ },
+ "how do you make compost at home": {
+  "ans": "Traditional  \nModern",
+  "err": "\n\u001b[2m  1 Wikipedia · Compost\n  2 cooking.stackexchange · What can you do with leftover corn husks?\n  3 biology.stackexchange · What species of thermophilic prokaryote is present in hot compost that creates white mould like threads?   14.5s\u001b[0m\n"
+ },
+ "how do I propagate a plant from cuttings": {
+  "ans": "not found",
+  "err": "tny: rejected — how-to answer names no command from the reference\n     the library has:\n       TED plants                        657 MB  tny --corpus add ted_mul_plants\n"
+ },
+ "what is a kernel in corn": {
+  "ans": "A kernel is a small one-seeded dry indehiscent fruit enclosed by the seed coat and pericarp.",
+  "err": "\n\u001b[2m  1 biology.stackexchange · Are corn kernels considered a grain\n  2 cooking.stackexchange · Deep frying corn kernels starts busting/exploding in oil\n  3 cooking.stackexchange · How do you cook corn kernels on BBQ?   20.5s\u001b[0m\n"
+ },
+ "what is a shell in biology": {
+  "ans": "A shell in biology refers to a protective covering that surrounds an organism, often made of keratin or other bony elements.",
+  "err": "\n\u001b[2m  1 Wikipedia · Turtle shell\n  2 Wikipedia · Galaxy (computational biology)\n  3 Wikipedia · Core–shell semiconductor nanocrystal   17.3s\u001b[0m\n"
+ },
+ "what is a cookie made of": {
+  "ans": "Cookies are typically made of butter, sugar, and flour.",
+  "err": "\n\u001b[2m  1 Wikipedia · Zombie cookie\n  2 cooking.stackexchange · If cookies are made with enough sugar, will they just be chewy caramel?\n  3 cooking.stackexchange · What could the dough of this cookie be made of?   17.4s\u001b[0m\n"
+ },
+ "how do python snakes kill their prey": {
+  "ans": "Python snakes kill their prey by swallowing it whole and wrapping their bodies around it through constriction.",
+  "err": "\n\u001b[2m  1 Wikipedia · Reticulated python\n  2 Wikipedia · Burmese python\n  3 biology.stackexchange · Could a large constrictor kill a small animal?   16.8s\u001b[0m\n"
+ },
+ "how does the brain consolidate long term memory": {
+  "ans": "The hippocampus plays a key role in consolidating long-term memory by linking new information with existing knowledge networks.",
+  "err": "\n\u001b[2m  1 Wikipedia · Memory\n  2 biology.stackexchange · Long-term-potentiation and memory. Where do we stand?\n  3 Wikipedia · Spatial memory   16.3s\u001b[0m\n"
+ },
+ "what is a kernel in an operating system": {
+  "ans": "A kernel is a component of a computer operating system that serves as an intermediary connecting software to hardware, enabling them to work together seamlessly.",
+  "err": "\n\u001b[2m  1 Wikipedia · Kernel (operating system)\n  2 Wikipedia · Kernel (operating system)\n  3 Wikipedia · Comparison of operating system kernels   15.4s\u001b[0m\n"
+ },
+ "what is a shell in computing": {
+  "ans": "A shell is a computer program that provides relatively broad and direct access to the system on which it runs.",
+  "err": "\n\u001b[2m  1 Wikipedia · Shell (computing)\n  2 Wikipedia · Shell (computing)\n  3 Wikipedia · Shell integration   15.0s\u001b[0m\n"
+ },
+ "what is an http cookie used for": {
+  "ans": "An HTTP cookie is used to store user preferences, session information, or other data across multiple requests.",
+  "err": "\n\u001b[2m  1 Wikipedia · HTTP cookie\n  2 Wikipedia · HTTP cookie\n  3 devdocs python · http.cookiejar   22.6s\u001b[0m\n"
+ },
+ "what is python the programming language": {
+  "ans": "Python is a high-level, general-purpose programming language that emphasizes code readability, simplicity, and ease-of-writing with significant indentation and garbage collection.",
+  "err": "\n\u001b[2m  1 Wikipedia · Python (programming language)\n  2 Wikipedia · Python (programming language)\n  3 Arch Wiki · Python   16.4s\u001b[0m\n"
+ },
+ "what is virtual memory in a computer": {
+  "ans": "Virtual memory is a memory management technique that uses data compression to reduce the size or number of paging requests to and from auxiliary storage.",
+  "err": "\n\u001b[2m  1 Wikipedia · Virtual memory\n  2 Wikipedia · Virtual memory\n  3 Wikipedia · Virtual memory compression   17.4s\u001b[0m\n"
+ }
+}

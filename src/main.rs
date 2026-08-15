@@ -31,11 +31,20 @@ const KIWIX_PORT: u16 = 8082;
 // 2.2× for the same 6/6, and Q4_K_M halves RAM but breaks the grounding check's recovery.
 const MODEL: &str = "ggml-org/Qwen3.5-0.8B-GGUF:Q8_0";
 const MODEL_DIR: &str = "models--ggml-org--Qwen3.5-0.8B-GGUF";
-// F31: lexical section selection needs top-5 × 600 chars for 14/14.
-const TOP_SECTIONS: usize = 5;
-const PER_SECTION: usize = 600;
+// F31: lexical section selection needs top-5 × 600 chars for 14/14. F80: also the prompt
+// size, and prefill is 19–22 s of a 20–40 s answer — so these are latency constants as much
+// as accuracy ones. Overridable so a sweep costs a run rather than a rebuild.
+fn top_sections() -> usize {
+    std::env::var("TNY_TOP_SECTIONS").ok().and_then(|v| v.parse().ok()).unwrap_or(5)
+}
+fn per_section() -> usize {
+    std::env::var("TNY_PER_SECTION").ok().and_then(|v| v.parse().ok()).unwrap_or(600)
+}
 // F58: the answer is in the top-1 article for 36/58 cases and in the top-3 for 45/58.
-const TOP_ARTICLES: usize = 3;
+// F82: overridable, to measure what a cheap first pass over one article would reach.
+fn top_articles() -> usize {
+    std::env::var("TNY_TOP_ARTICLES").ok().and_then(|v| v.parse().ok()).unwrap_or(3)
+}
 // F63: hits per book. Deeper costs nothing — one request per book either way, just a longer
 // response — and it lifts the recall ceiling from 54/58 to 55/58 (`Hippocampus` answers
 // "how does the brain consolidate long term memory" from its book's 6th hit). 12 adds nothing
@@ -566,7 +575,7 @@ fn answer_once(cfg: &Cfg, question: &str, follow: bool) -> Result<(i32, Vec<Sour
     spin.say(format!("reading {}", ranked[0].title));
     let t = Instant::now();
     let mut docs: Vec<(&retrieve::Candidate, String)> = Vec::new();
-    for c in ranked.iter().take(TOP_ARTICLES) {
+    for c in ranked.iter().take(top_articles()) {
         match article(&cfg.kiwix, &c.book, &c.path) {
             Ok(html) => docs.push((c, html)),
             Err(e) if docs.is_empty() => return Err(e),
@@ -577,11 +586,11 @@ fn answer_once(cfg: &Cfg, question: &str, follow: bool) -> Result<(i32, Vec<Sour
 
     // The budget is split, not multiplied: the same ~3 KB of context, sourced from three
     // articles. F41 measured that a bigger window does not buy accuracy — placement does.
-    let per_doc = TOP_SECTIONS.div_ceil(docs.len().max(1));
+    let per_doc = top_sections().div_ceil(docs.len().max(1));
     let mut parts = Vec::new();
     let mut heads = Vec::new();
     for (c, html) in &docs {
-        let p = pick_sections(html, &retrieval_q, per_doc, PER_SECTION);
+        let p = pick_sections(html, &retrieval_q, per_doc, per_section());
         if p.text.trim().is_empty() {
             continue;
         }

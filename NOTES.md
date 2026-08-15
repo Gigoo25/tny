@@ -2139,6 +2139,119 @@ which is trained for answerhood rather than relevance. llama.cpp cannot serve on
 span-classification head — so it would cost a second runtime, and F79 says nothing about
 whether it would work. It is the one untested shape.
 
+## F80 — the prompt cannot shrink, and the quantisation does not matter
+
+F76 listed "less input" as the free latency win: prefill is 19–22 s of a 20–40 s answer, and
+F41 measured that a bigger window buys no accuracy. Both halves of that were checked, and the
+conclusion was wrong.
+
+**Shrinking the context loses answers.** `TNY_TOP_SECTIONS`/`TNY_PER_SECTION` sweep, measured
+by whether the fact reaches the context at all (`bench/ctx-cli.mjs`, 58 cases):
+
+```
+top=5 per=600    46/58    3787 chars   ← shipping
+top=5 per=400    42/58    2587
+top=3 per=600    40/58    1917
+top=3 per=400    35/58    1317
+top=3 per=300    29/58    1017
+```
+
+F41 said a *bigger* window buys nothing. It does not follow that a smaller one is free: 5×600
+is the knee, and every step down costs 4–17 cases. The most expensive change measured today.
+
+**The text is already dense.** 3787 chars tokenise to 913 tokens — 4.15 chars/token, which is
+ordinary English. There is no boilerplate left to strip; the earlier citation-noise and
+navigation filters already took it.
+
+**Batch knobs are already optimal.** `n_ubatch` 512 (the default) is the best of 128/256/512
+at 35 t/s, and `n_batch` makes no difference at all:
+
+```
+ubatch 128   23.7 t/s        ubatch 256   30.6 t/s        ubatch 512   35.1 t/s
+```
+
+**Quantisation is the wrong knob for prefill.** Q4_K_M against Q8_0, same model:
+
+```
+          prefill pp1024      decode tg32
+Q8_0        33.9 t/s            5.7 t/s
+Q4_K_M      34.8 t/s  (+2.8%)   6.9 t/s  (+20%)
+```
+
+Prefill is compute-bound — the dequantised GEMM is the same work either way — so halving the
+weights buys 3 %. Only decode is bandwidth-bound, and decode is ~80 tokens against 913 of
+prefill. On a 41 s answer that is 2 s, for the grounding regression F46 already measured.
+
+What is left is the number of FLOPs per token, i.e. a smaller model:
+
+```
+              prefill    decode    estimated 913-token answer
+0.8B Q8_0     33.9 t/s   5.7 t/s   41 s
+350M Q8_0     75.7       14.6      18 s   (2.3x)
+230M Q8_0    120.0       22.8      11 s   (3.7x)
+```
+
+F26/F43 rejected both as unable to hold the grounding rules, but that was measured before F79
+showed the model's job is selection rather than synthesis. Re-measuring on the 58 cases is one
+server and one benchmark run, and the answer cache is now keyed per model (`TNY_ANSWERS`) so a
+variant can never overwrite the 42/58 baseline it is compared against.
+
+## F81 — 350M is 2.6x faster and doubles the wrong answers
+
+F80 left "a smaller generator" as the only untried latency lever, and F79 had reframed the
+task as selection rather than synthesis, which is the kind of job a small model might hold.
+Measured end-to-end on the 58 cases, same retrieval, same grader, `TNY_CHAT` pointed at a
+350M server (`TNY_ANSWERS` keeps the baseline cache intact):
+
+```
+              correct   refused   wrong   per answer
+0.8B Q8_0      42/58        8       8      ~41 s
+350M Q8_0      32/58       10      16      15.7 s
+```
+
+```
+set     0.8B    350M
+inst    13/18    6/18     shell commands collapse
+qa       6/14    4/14
+gen     14/16   12/16
+amb      9/10   10/10
+```
+
+2.6x for ten answers — but the direction of the loss is what settles it: **wrong answers
+double, 8 → 16**. The whole point of F27/F44/F45 is that a refusal is safe and a confident
+wrong answer is not, and this trades one for the other. Instructional questions take the
+worst of it, which is the class where being wrong costs the user a broken command.
+
+F26/F43 rejected 350M before; this rejects it again with a number, on the current pipeline.
+
+## F82 — the cheap first pass: 69 % of questions do not need the other two articles
+
+If the prompt cannot shrink for every question (F80), it can shrink for *most* of them. Same
+recall measurement, varying how much is read before the model is called:
+
+```
+articles  sections   fact in context   prompt
+   1         2          40/58          1251 chars   ~310 tok    9 s prefill
+   1         5          43/58          ~3000
+   2         4          44/58
+   3         5          46/58          3787 chars   ~913 tok   27 s prefill   ← shipping
+```
+
+One article, two sections, carries the answer for 40 of 58 — 69 % — at a third of the prefill.
+The escalation trigger already exists: the grounding rules reject an answer the context does
+not support, and that rejection is exactly the signal to re-ask with the full three articles.
+
+```
+E[t] = 0.69 x 12 s + 0.31 x (12 + 30) s = 21 s   against 30-41 s today
+```
+
+The risk is not the misses — those escalate — but a plausible answer built from a partial
+article, which grounding accepts because the sentence *is* supported by the text it was shown.
+Worth building only with the full 58-case answer run as the check, not the recall proxy.
+
+Also worth noting from the same table: three articles buy 2 cases over one article read deeper
+(46 vs 43). The multi-article context is much less load-bearing than its cost implies.
+
 ## Exploration backlog — speed
 
 The cost model, measured (0.8B Q8_0, 4 threads, this CPU):

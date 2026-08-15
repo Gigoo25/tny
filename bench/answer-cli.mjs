@@ -12,7 +12,8 @@ const only = process.argv.slice(2).find(a => !a.startsWith("-"));
 // Generation costs ~20 s per case, so a grader change must never re-pay it: answers are cached
 // verbatim and `--regrade` scores the cache offline, the same split that made the retrieval
 // sweep usable (F56).
-const CACHE = "bench/.answers.json";
+// One cache per model: a variant run must never overwrite the baseline it is compared against.
+const CACHE = process.env.TNY_ANSWERS ?? "bench/.answers.json";
 const regrade = process.argv.includes("--regrade");
 const cache = await Bun.file(CACHE).exists() ? JSON.parse(await Bun.file(CACHE).text()) : {};
 const tally = tallyOf();
