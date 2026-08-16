@@ -2922,3 +2922,43 @@ Two rules that came out of this:
    `file` from 18 calls into 6 with no loss of information.
 2. **A 6-case fixture cannot rank two options.** `file` scored 3/6 and 5/6 on the *same
    arm at the same budget*. Either sample repeatedly or do not claim a difference.
+
+## F113 — asking the user which sense: built, measured on false fires, deleted
+
+F112 catches the wrong sense *after* an answer has been paid for. The cheaper place is the
+shortlist: if two candidate titles each qualify the question's own subject differently, nobody in
+the pipeline knows which sense was asked for — and F16 says the model must not choose. Ask the
+user, the way F37 intended for comparisons before F86 replaced it with "show both sides".
+
+The trigger, model-free: for a definitional question, flag every candidate title that shares a
+word with the question AND adds one the question never used. Two or more flagged titles means the
+corpus holds two senses. Two unit tests passed, including the case it was built for.
+
+Measured against all 58 questions with `--rank` (no model calls, 45 s). It fires on **9**:
+
+```
+what is a cookie made of        Zombie cookie | HTTP cookie                  TRUE
+what is a shell in biology      Turtle shell | Galaxy (computational bio)    marginal
+what is a kernel in corn        Sweet corn | Corn starch | Corn tortilla     one sense, three pages
+difference between sym/hard     Symbolic link | Hard link                    a comparison; F37 owns it
+what is a kernel in an OS       Comparison of operating system kernels | …   question disambiguates itself
+what is python the language     Mojo | Ruby | Pyrex | Julia                  sibling languages, not senses
+what is an http cookie used for http.cookiejar | http.cookies | Secure …     one sense
+what is a shell in computing    (a Stack Exchange question title)            noise
+what is wrong with parsing ls   (two Stack Exchange question titles)         noise
+```
+
+**One true positive, seven or eight false fires.** F37's ask-the-user path was held to 6/6
+detection and 0/26 false fires; this is 16 % of all questions interrupted and ~85 % of those
+interruptions wrong. Deleted, on F71's precedent.
+
+**Why it failed, and it is the transferable part:** "adds a word the question never used" is a
+strong signal in an *answer*, because an answer's definitional subject is a deliberate claim about
+what is being defined. It is a worthless signal in a *title*, because every title differs from the
+question — by a disambiguating parenthetical, by a page-type word, or by being a whole Stack
+Exchange question sentence. The same invariant is load-bearing at one stage and noise at the next.
+
+What survives: F112's post-answer rule, which measured correct 37 -> 39 and wrong 20 -> 16. And
+the conclusion that the sense-collision class belongs to **ranking** — `Zombie cookie` outranking
+`HTTP cookie` for "what is a cookie made of" is `article@1` (35/58), and no rule downstream of a
+bad rank-1 can do better than reject an answer that was already paid for.
