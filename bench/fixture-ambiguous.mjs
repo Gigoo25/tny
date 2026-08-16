@@ -112,7 +112,7 @@ export const CASES = [
   // ---- computing sense wanted, everyday sense must lose ----------------------------
   ["what is a kernel in an operating system", "concept", COMP,
     /^Kernel \(operating system\)$/i, /computer program at the core of a computer/i,
-    /^(?![\s\S]*\b(maize|corn|popcorn|seeds?|caryopsis|cob)\b)[\s\S]*(core of (?:a|the|an)?[\s\S]{0,30}(?:computer|operating system|os)|central (?:part|component|core)|complete control|(?:controls?|manages?|mediat\w*|arbitrat\w*|interfaces?|bridges?|intermediar\w*|connect\w*|link\w*)[\s\S]{0,60}(?:hardware|resources|processes|memory|software))/i],
+    /^(?![\s\S]*\b(maize|corn|popcorn|seeds?|caryopsis|cob)\b)[\s\S]*(core of (?:a|the|an)?[\s\S]{0,30}(?:computer|operating system|os)|central (?:part|component|core)|complete control|(?:control\w*|manag\w*|mediat\w*|arbitrat\w*|interfac\w*|bridg\w*|intermediar\w*|connect\w*|link\w*)[\s\S]{0,60}(?:hardware|resources|processes|memory|software))/i],
     // grades: accepts core-of-the-OS, complete control, or mediating hardware/processes;
     // rejects "the edible seed or grain of maize, found on the cob".
   // prep: "kernel operating system". COMP r=0; union idx 7 of 48. TOP holds the same page

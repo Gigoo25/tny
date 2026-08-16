@@ -11,12 +11,12 @@ Portable: any computer, CPU-only, no GPU assumed.
 
 ## Status
 
-Sessions 1–9 (2026-08-13 → 2026-08-15). **Built and measured**: 4,266 lines of Rust, 16 unit
-tests, 107 findings. Current numbers, and what is weak, are in `README.md` → *Where it
+Sessions 1–10 (2026-08-13 → 2026-08-15). **Built and measured**: 4,266 lines of Rust, 16 unit
+tests, 108 findings. Current numbers, and what is weak, are in `README.md` → *Where it
 stands*; this file is the evidence, append-only, and it wins where the three documents
 disagree.
 
-- `NOTES.md` — findings, append-only (this file). F1–F107.
+- `NOTES.md` — findings, append-only (this file). F1–F108.
 - `PLAN.md` — design, phases and non-goals. All phases shipped except P5 (cut, F41).
 - `bench/*-cli.mjs` — the guards that run against the shipped binary; each pins its own
   configuration (F105). `bench/harness.mjs` is the pre-Rust harness, kept for the
@@ -2536,6 +2536,208 @@ Three things the run exposed that were not about the model at all:
 **Recommendation: keep 0.8B as the default.** 4B is worth having behind `--model 4b` for the
 case where a wrong answer is expensive and four minutes is acceptable, and it will look
 different on a machine with enough RAM to hold it — which this one does not have.
+
+## F108 — the graders were audited case by case, and the number moved without the system
+
+F74 moved the total 34 → 42 by rewording graders over identical cached answers, and F64 found
+the grader itself broken. Neither was followed by a systematic pass: `bench/expect.mjs` had 58
+hand-written accept-regexes and no test. `bench/audit.mjs` now prints every cached answer beside
+its fact and its verdict, which is the F65 hand-audit made reproducible instead of a terminal
+scroll. Auditing `inst` and `qa` (32 of 58) found **seven defects in both directions**:
+
+```
+set  case                  was    is     why
+inst systemd enable        ok     WRONG  "use the `enable` command with --now" names no runnable
+                                         command and --now is not required for boot
+inst sudo                  ok     WRONG  passed on the bare word `sudoers`; the example
+                                         `archie hostname = (ALL:ALL)` is not a rule, and the
+                                         "no password needed" claim is invented
+qa   bash syntax error     ok     WRONG  "a missing trailing quote mark ... caused by dos2unix"
+                                         is the exact fabrication the comment says to reject,
+                                         and it passed on the word `dos2unix`
+inst json.dumps            WRONG  ok     indent, sort_keys, check_circular, allow_nan, cls are
+                                         real arguments; the pattern accepted 2 of 12
+qa   permission denied     WRONG  ok     "requires the script to be executable" is the execute
+                                         bit without the words "permission" or "bit"
+inst --oneline             WRONG  WRONG   right verdict, wrong reason: `(single|one) line` fails
+                                         on "single-line". Now rejected for "disables tab
+                                         expansion", which is the recorded fabrication (F92)
+inst git reset             WRONG  WRONG   `--hard` anywhere rejected the answer, so "use --soft,
+                                         never --hard" — the safest possible answer — was a
+                                         failure. Only `reset --hard` as the instruction rejects
+```
+
+Every widened pattern was checked in both directions mechanically (17 assertions, all pass):
+each accepts the paraphrase it was widened for and still rejects the plausible wrong answer.
+
+Two structural defects in `bench/grade.mjs`, independent of any regex:
+
+- **stderr outranked stdout.** `/kiwix/` was tested before the answer, so the mount-drift notice
+  (`main.rs:1396`) scored a perfectly good answer as ERROR. Infrastructure now decides the
+  verdict only when it cost us the answer.
+- **A retrieval miss was counted as a model refusal.** `main.rs:1319` prints the same
+  `not found` when nothing was retrieved as the grounding rules do when they reject an answer,
+  so cases where the model was *never called* were credited to its judgement — F107's timeout
+  defect in another costume. New `MISS` column. It immediately reclassified 2 of 350M's 10
+  refusals, and 40 of the 2B cache's, which only ever covered `inst`.
+
+Regrading all three frozen caches, same answers, corrected grader:
+
+```
+                 was                        is
+0.8B Q8_0     36/58  4 ref  18 wrong     35/58  4 ref  19 wrong   inst 8/18 qa 6/14 gen 14/16 amb 7/10
+350M Q8_0     32/58 10 ref  16 wrong     32/58  8 ref  16 wrong  2 missed
+2B Q4_K_M     12/18  3 ref   3 wrong     13/18  3 ref   2 wrong  (40 missed = never run)
+```
+
+**35/58 is the current end-to-end number**, and `README.md` was quoting `inst 11/18` from the
+42/58 era — a subset denominator, on a corpus of sixteen books that no longer exists, and not
+reproducible from the cache in this repo (which reads `inst 8/18`). The full-fixture number is
+now what README reports.
+
+### What the audit also exposed, and these are product bugs
+
+- **`I/O` is not an identifier.** A `qa` refusal read `identifier not in reference: I/O`, from
+  `IDENT`'s `[A-Za-z0-9_.]*(?:::|_|/)[…]` alternative matching ordinary English across a slash.
+  Left unfixed: F27's own rule is to measure the false-reject rate by sampling before touching a
+  grounding regex, and one case is not a sample.
+- **A retracted claim.** I first recorded this as "the corpus-suggestion block leaks into the
+  grounding reference", because `bench/audit.mjs` collapses whitespace and printed the rejection
+  note and a later `the library has:` block as one line. Two stderr messages, no leak. Recorded
+  because a bug found by a display artefact is the same mistake as F33, and cheaper to admit.
+- **The question's own identifier was rejected as ungrounded.** "what does unwrap_or_default
+  return on an Option" → `rejected — identifier not in reference: unwrap_or_default`, against an
+  `std::option::Option` page that certainly contains it. Either the wrong article was fetched or
+  `ground.rs:282` normalises nothing; `ground.rs:257` has the same shape of bug for numbers,
+  where a reference "5,895" rejects a correct "5895".
+- **The model narrates its input.** Two answers begin "The reference material states/indicates
+  that…", which is prompt leakage, not an answer.
+
+**Not measured here.** `gen` (16 numeric-fact cases) and `amb` (10 word-sense pairs, authored
+with a sibling-sense harness) were not hand-audited — the first grades on hard numbers, the
+second was already audited under that harness. And a corrected grader is still a grader: it
+cannot see a retrieval regression, because `--regrade` scores frozen text. The next honest
+number needs a fresh 58-case generation run on the 18-book corpus.
+
+## F109 — five defects the audit pointed at, and the two it did not license touching
+
+All five are single-purpose fixes with no measurement of their own, because measurement needs
+the 18-book corpus and this session did not have it. `cargo test` 16/16, release build clean.
+
+**1. The section budget over-shipped by 20 %.** `top_sections.div_ceil(docs.len())` rounds up
+per document, so `medium`'s 5 sections over 3 articles was **6**: 3600 chars of sections against
+the 3000 the constant names, which is F80's measured 3787 including headers. It now distributes
+exactly `top_sections` — `secs / n + (i < secs % n)`. At 25 ms per input token the sixth section
+was ~5 s of every answer. **This changes the shipping context**, so F80's `top=5 per=600 → 46/58`
+is no longer the shipping configuration's number; `TNY_TOP_SECTIONS=6` reproduces the old
+behaviour exactly, and which of 5 or 6 is right is now a sweep rather than an accident.
+
+**2. A number was normalised on one side only.** `ungrounded_detail` stripped `.,` from the
+answer's number and never from the reference, so a reference "5,895 m" rejected a correct
+"5895" — `retrieve.rs`'s own showcase case. Both sides are normalised now. Strictly fewer false
+refusals: the digits must still appear in sequence.
+
+**3. `-t` was the logical CPU count.** `available_parallelism()` counts hyperthreads, and on a
+P/E hybrid it counts efficiency cores too, so every ggml barrier waits on the slowest one. F3
+measured the *4th* thread on a 2-core box as net negative, and every number in this file was
+taken at `-t 4` on that box, where the two agreed by coincidence. Now physical cores from
+`/proc/cpuinfo`'s unique (physical id, core id) pairs, with `TNY_THREADS` overriding — the knob
+`PLAN.md` has always documented and the code never read.
+
+**4. The previous question took the query budget.** `search_terms` cuts a query to its eight
+most informative terms, and the follow-up query was `"{prev} {this}"`, so on a long previous
+question the current one's terms were the ones cut. Current question first. F29's concatenation
+is unchanged — only its order.
+
+**5. Disambiguation collapsed inside a book.** The dedupe key stripped a greedy trailing
+parenthetical, so "Mercury (planet)" and "Mercury (element)" — or "Python (snake)" and "Python
+(programming language)", which is the `amb` fixture's entire subject — shared a key and the
+second was dropped. The key is the whole title now. F14's localised duplicates were never this
+rule's job; `LOCALISED` handles them, and `TRAIL_PAREN` is deleted.
+
+### Not touched, and why
+
+- **Comparison sides are still validated against the slice, not the union.** Every other rule in
+  `ungrounded` reads the whole article (F32); this one reads what was shown, because F38 measured
+  the failure it exists for — given one side, the model invents the other. Defect 1 removes the
+  section starvation that made it fire, which is the honest first move.
+- **The ranking weights.** `title_covered`'s substring test lets a query term `zip` satisfy a
+  title word `ip`, and a title with more than five terms is hard-zeroed regardless of precision.
+  Both are worth cases. Both are also F49's measured configuration, and `article@1 34/58` cannot
+  be re-measured without the corpus — changing a scorer blind is how F56's weights were wrong in
+  the first place. This is the one item on the list that the download unblocks.
+
+## F110 — the held-out set measured whether the index was alive
+
+`bench/holdout-cli.mjs` claimed "93 questions taken from the pages themselves, which nothing was
+tuned against". Three claims, three defects:
+
+- **The query was the answer key.** `ctxFor(title)` searched for the page's own title, and
+  `hit = ctx.includes(title.slice(0, 40))` tested whether it came back — from a context that
+  prints the title of every retrieved article (`main.rs`), so the check was recall@**3**, not
+  rank-1, against a query that could not miss. 55/57 is roughly the floor for a working Xapian
+  index. The "leak-free" body arm fed `posts[0].slice(0, 220)` — 220 verbatim characters of the
+  target page, ~20 terms that occur in exactly one document. BM25 cannot lose that either.
+- **It was tuned against.** `main.rs` records per-book capping rejected because it "costs a case
+  on the held-out set (evidence 50/55 -> 49/55)", and F68 accepted a term change on "held-out
+  confirmation: body 48/57 -> 50/57". A dev set reported as a holdout.
+- **93 is 81.** `holdout.tsv` has 60 `se` rows and 21 `ref` rows. No arm could ever exceed 60.
+
+The tell was already in F90's own table: man pages moved `article@1` 37 → 34 and cost six
+end-to-end answers while held-out body sat at 54/57 → 54/57. It certified no harm for the
+largest regression in the project.
+
+Rewritten: the query is the Stack Exchange question **slug** — words a real user typed, which is
+where these pages came from — and the metric is strict rank-1 on the target *path*, the same
+metric `rank-cli.mjs` uses, so the number is directly comparable to its 34/58. The `evidence`
+substring vote is gone (4 of 12 words, `ctx.includes`, so `network` matched `networking`), and so
+is the title arm.
+
+**What it still is not.** The slug is the page's own title, so this measures whether ranking
+finds a page from its own words, not whether it survives a paraphrase. Real generalisation needs
+questions written without sight of the page, and nothing in `bench/` produces one. Until that
+exists there is **no generalisation evidence in this repo**, and the 58-case fixture — authored
+here, against a corpus that has since changed three times — is all there is. Unrun: needs the
+corpus.
+
+## F111 — the model as a last-resort judge: implemented, measured, fires on nothing
+
+The wrong-answer family no deterministic rule can see: "why is the sky blue" answered from
+`Sky Blue Sky`, the Wilco album, and "what is a cookie made of" answered from `Zombie cookie`.
+Both are *grounded* — every number and identifier is in the reference — and the question's terms
+are contained in the article's title, so no lexical check sees them either. F16 rejected the
+model as a **selector** (argmax over eight candidates, near-constant index at 350M); this is a
+different job: one question, one answer, one token out, and it can only turn an answer into a
+refusal. Built as `TNY_JUDGE=1`, called only after all three deterministic rules pass.
+
+Probed by hand against the live server, it discriminates:
+
+```
+why is the sky blue        / Sky Blue Sky, Wilco, Billboard 200   -> yes   (miss)
+what is a cookie made of   / a zombie cookie is a piece of data   -> no    (catch)
+how do I enable the locale / uncomment locale.gen, run locale-gen -> yes   (correct)
+```
+
+On the 58 cases it changed **nothing**: 37/58 correct, 1 refused, 20 wrong, byte-identical
+verdict counts to the same build with the judge off, and **zero** judge rejections.
+
+Two lessons, and the second is the finding:
+
+- **The first version was dead code.** It was gated on the escalation ladder's last rung, and the
+  ladder breaks at rung 1 whenever the deterministic rules pass — which is most questions. Now it
+  runs on every rung: an early "no" escalates (costs context, not the answer), the last rung's
+  "no" refuses. Re-measured after the fix: still zero rejections.
+- **Its verdict is not stable under paraphrase.** The hand-written short form of the zombie-cookie
+  answer scored `no`; the answer the pipeline actually produces scores `yes`. That is F16's result
+  in a new costume — the discrimination exists but is not robust enough to veto with, and a veto
+  that fires on 0 of 58 has no measured benefit to weigh against its call.
+
+**Stays behind the flag.** Shipping it on would add a call per answer for an effect no measurement
+can see. The next move is not a better prompt — it is the retrieval work: seven of the twenty
+wrong answers are this family, and all seven are `article@1` (35/58) putting the wrong page first.
+
+Also measured, same session: **run-to-run noise is ±1-2 cases** at temp 0.1 (37/58 and 38/58 from
+the same build and configuration), on top of the grader's ±3-4. Nothing below 4 cases is a result.
 
 ## Exploration backlog — speed
 

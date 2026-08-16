@@ -16,19 +16,22 @@ export const EXPECT = {
   instructional: [
     // 0 hostname: the persistent mechanism, not the volatile `hostname foo`
     /hostnamectl|\/etc\/hostname/i,
-    // 1 must be `enable`, not `start` — `start` alone does not survive a reboot. The verb has
-    // to sit next to the tool or `--now`, or it just matches the question restated.
-    /systemctl\s+enable|enable[\s\S]{0,40}--now|--now[\s\S]{0,40}enable/i,
+    // 1 must be `enable`, not `start` — `start` alone does not survive a reboot. The tool has
+    // to be named: "use the `enable` command with `--now`" names nothing runnable, asserts a
+    // requirement `--now` does not have, and is the question restated.
+    /systemctl[\s\S]{0,20}enable|enable[\s\S]{0,20}systemctl/i,
     // 2 -m/--create-home is the load-bearing option
     /useradd[\s\S]{0,60}(-m\b|--create-home)|(-m\b|--create-home)[\s\S]{0,60}useradd/i,
     /resize2fs/i,
     /UUID=/i,
     /locale[-.]gen/i,
-    // 6 wheel group or the sudoers mechanism
-    /wheel|visudo|sudoers/i,
-    // 7 --soft keeps the changes the question asks to keep; --hard destroys them, and HEAD~3
-    // drops three commits instead of one. Both are rejected outright.
-    /^(?![\s\S]*--hard)(?![\s\S]*HEAD~[2-9])[\s\S]*reset[\s\S]{0,30}(--soft|--mixed)/i,
+    // 6 the wheel group, or a well-formed sudoers entry. The bare word `sudoers` is not
+    // evidence — the question invites it, and `archie hostname = (ALL:ALL)` is not a rule.
+    /wheel|visudo|ALL\s*=\s*\(/i,
+    // 7 --soft keeps the changes the question asks to keep; HEAD~3 drops three commits instead
+    // of one. Both are rejected — but only `reset --hard` as the *instruction*: an answer that
+    // names --hard to warn against it is the safest answer there is.
+    /^(?![\s\S]*reset\s+--hard)(?![\s\S]*HEAD~[2-9])[\s\S]*reset[\s\S]{0,30}(--soft|--mixed)/i,
     /--amend/i,
     /docker\s+tag/i,
     /CREATE\s+ROLE[\s\S]{0,80}PASSWORD/i,
@@ -37,9 +40,13 @@ export const EXPECT = {
     /default[\s\S]{0,20}value|T::default|Default::default|default\(\)/i,
     // 13 the form is ${parameter:-word}; "a colon command" is not it
     /\$\{[^}]*:[-=]|:[-=]\s*word|parameter expansion/i,
-    // 14 shorthand for --pretty=oneline --abbrev-commit: one commit per line
-    /--pretty=oneline|abbrev-commit|(single|one) line/i,
-    /skipkeys|ensure_ascii/i,
+    // 14 shorthand for --pretty=oneline --abbrev-commit: one commit per line. "single-line" is
+    // the fact and a hyphen must not decide the verdict; "disables tab expansion" is the
+    // recorded fabrication for this case (F92) and is what rejects it.
+    /^(?![\s\S]*tab expansion)[\s\S]*(--pretty=oneline|abbrev-commit|(single|one)[- ]line)/i,
+    // 15 any of the documented keyword arguments. skipkeys/ensure_ascii are two of twelve, and
+    // naming indent/sort_keys/allow_nan/cls answers the question just as well.
+    /skipkeys|ensure_ascii|sort_keys|check_circular|allow_nan|separators|\bindent\b|\bcls\b/i,
     // 16 the actual documented limits, not "arbitrary precision" hand-waving
     /NUMERIC\s*\(|precision\s*,\s*scale|131072|16383/i,
     // 17 removes the container when it exits
@@ -47,13 +54,15 @@ export const EXPECT = {
   ],
 
   qa: [
-    // 0 the execute bit — not ownership, not a missing shebang
-    /execut\w*\s+(permission|bit)|chmod|\bx\s+permission/i,
+    // 0 the execute bit — not ownership, not a missing shebang. "requires the script to be
+    // executable" is the fact without the words "permission" or "bit".
+    /chmod|execut\w*\s+(permission|bit)|\bx\s+permission|(be|not)\s+executable/i,
     // 1 nothing is listening: no sshd, wrong port, or a firewall
     /(no|not|isn.t)[\s\S]{0,40}(sshd|ssh daemon|listening|running)|nothing[\s\S]{0,20}listening|wrong port|firewall|port[\s\S]{0,20}closed/i,
     /lsof|fuser/i,
-    // 3 CRLF line endings, or a missing `do` — never "a missing quote mark"
-    /\\r|carriage return|CRLF|dos2unix|tr\s+-d|line ending|missing\s+`?do`?\b/i,
+    // 3 CRLF line endings, or a missing `do`. "a missing quote mark" is the recorded
+    // fabrication and rejects the answer outright, however many real terms follow it.
+    /^(?![\s\S]*quote)[\s\S]*(\\r|carriage return|CRLF|dos2unix|tr\s+-d|line ending|missing\s+`?do`?\b)/i,
     // 4 127 means specifically that the command was not found
     /command\s+(cannot be |not )found|not found/i,
     /ssh-keygen[\s\S]{0,30}-R|known_hosts/i,
@@ -65,15 +74,17 @@ export const EXPECT = {
     /find[\s\S]{0,40}(-delete|-exec)|xargs|ARG_MAX|too many arguments|exceed\w*[\s\S]{0,40}(limit|maximum|argument)/i,
     // 8 inodes or the directory index are exhausted, not the blocks
     /inode|dir_index|directory index|hash collision/i,
-    // 9 the shell cached the old path
-    /hash\s+-[dr]\b|hash(ed)?\s+(table|cache)|rehash|shell[\s\S]{0,30}cache/i,
+    // 9 the shell cached the old path. "bash hashed the original version" names the mechanism
+    // without the word table or cache; the stem is the fact, not the noun after it.
+    /hash\s+-[dr]\b|hash(ed|es)?\s+(table|cache)|(bash|shell|it)\s+hash(ed|es)?\b|rehash|shell[\s\S]{0,30}cache/i,
     // 10 by-design clarify prompt; the fact it would need is the shared inode
     /inode/i,
     /replace[\s\S]{0,40}(process|shell|image)|in place/i,
     // 12 filenames may contain newlines and spaces, so the output is unparseable
     /newline|special character|space[\s\S]{0,30}(filename|name)|arbitrary character|unpredictab/i,
-    // 13 by-design clarify prompt; SIGKILL cannot be caught
-    /(can.?t|cannot|unable to)\s+be\s+(caught|ignored|handled)|uncatchable/i,
+    // 13 SIGKILL cannot be caught — stating the consequence ("no chance to clean up") is
+    // stating the fact. A bare "SIGKILL is stronger" still fails, which is the point.
+    /(can.?t|cannot|unable to)\s+be\s+(caught|ignored|handled)|uncatchable|without[\s\S]{0,40}(chance|opportunity)[\s\S]{0,25}(clean|handl|catch|exit)/i,
   ],
 
   general: [

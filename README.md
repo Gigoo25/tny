@@ -54,6 +54,11 @@ next time (`~/.cache/tny/prefs`).
 | `--slow` | three articles, twice as deep | ~50 s |
 | `--molasses` | three articles, as deep as it gets | ~90 s |
 
+Those are ceilings, not costs. An answer starts at one article and two sections (~9 s of
+prefill) and only re-reads at the full budget when the grounding rules reject the first attempt
+— F82 measured that one article carries the fact for 40 of 58 questions, so most answers never
+pay for the other two.
+
 `--low` / `--max` set answer length (one sentence / up to three paragraphs).
 `--model 0.8b|2b|4b|<hf repo:quant>` picks who answers. Bigger is not automatically better
 here — see `NOTES.md`.
@@ -93,35 +98,42 @@ that is not in the source text.
 
 ## Where it stands
 
-4,266 lines of Rust, 36 commits, 107 findings. Every number below comes from `bench/`, and
+4,266 lines of Rust, 36 commits, 110 findings. Every number below comes from `bench/`, and
 each guard pins its own configuration (F105) so a run is reproducible.
 
 | what it measures | command | current |
 |---|---|---|
 | grounding rules (no servers, no network) | `cargo test` | **16/16** |
 | is the right article retrieved | `bun bench/rank-cli.mjs` | rank-1 **34/58**, in shortlist **48/58** |
-| is the fact in the context handed to the model | `bun bench/ctx-cli.mjs` | **48/58** |
-| is the answer right, end to end | `bun bench/answer-cli.mjs inst` | **11/18** correct, 2 refused, 5 wrong |
-| questions nobody here wrote | `bun bench/holdout-cli.mjs` | title **55/57**, body **54/57**, ref **18/18** |
+| is the fact in the context handed to the model | `bun bench/ctx-cli.mjs` | 48/58 — **stale, F109 changed the context** |
+| is the answer right, end to end | `bun bench/answer-cli.mjs --regrade` | **35/58** correct, 4 refused, **19 wrong** |
+| retrieval on questions nobody here wrote | `bun bench/holdout-cli.mjs` | rank-1, 81 pages — **unrun since F110 rewrote it** |
 
 Corpus behind those numbers: 18 ZIMs, 5.5 GB — Wikipedia, Stack Exchange, Arch Wiki, DevDocs,
 man pages. Hardware: 4-core 2015 laptop, no GPU, 8 GB RAM.
 
 ### What is honestly weak
 
-- **It is slow.** 39 s for a default answer here, 85-90 % of it prefill. `--ultrafast`
+- **It is slow.** 39 s for a default answer here, two thirds of it prefill. `--ultrafast`
   (0.3 s, no model) exists because sometimes the passage is all you wanted.
-- **Refusals are common.** 2 of the 18 above, and nearer a quarter across the full 58. A
-  refusal is the *designed* failure — the grounding check rejects any answer whose commands
-  or paths are not in the source — but it is still a non-answer.
-- **11/18 is the honest end-to-end number**, and the gap is mostly *selection*: in 43 of 58
-  cases the answer is already a single sentence in the retrieved text (F79), and no selector
-  tried — lexical, bi-encoder, two cross-encoders — picked it better than the model does.
+- **19 of 58 answers are confidently wrong**, and that is the number that matters for a tool
+  that prints shell commands. It more than doubled when man pages joined the corpus (F92):
+  refusals fell 8 → 4 and wrong answers rose 8 → 19. A refusal is the *designed* failure — the
+  grounding check rejects any answer whose commands or paths are not in the source — and the
+  corpus change traded the safe failure for the dangerous one.
+- **35/58 is the honest end-to-end number** (F108: the graders were audited case by case and
+  three of them were passing answers that name no runnable command). The gap is mostly
+  *selection*: in 43 of 58 cases the answer is already a single sentence in the retrieved text
+  (F79), and no selector tried — lexical, bi-encoder, two cross-encoders — picked it better
+  than the model does.
 - **Bigger models do not fix it.** 4B: half the wrong answers, 3.7× the wall clock, two fewer
   correct, does not fit in 8 GB (F107). 2B: no better (F90). 350M: twice as wrong (F81).
-- **A 58-case fixture cannot resolve small differences**, and it was authored here against
-  this corpus. `holdout-cli` counters that with 93 questions taken from the pages themselves,
-  which nothing was tuned against.
+- **A 58-case fixture cannot resolve small differences.** Regrading identical cached answers
+  has moved the total by 8 cases (F74) and by 1 (F108), so nothing smaller than that is a
+  result. It was also authored here against this corpus, and `holdout-cli` no longer pretends
+  to counter that: it used to query each page by its own title and check whether the title came
+  back, which measures whether the index is alive (F110). **There is no generalisation evidence
+  in this repo** until someone writes questions without looking at the pages.
 
 ## The measurements
 

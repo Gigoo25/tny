@@ -1,0 +1,234 @@
+{
+ "how do I change the hostname of my machine": {
+  "ans": "To change the hostname, you can use the `hostname` command with the `--static` or `--transient` options, or the `hostnamectl` utility if available. The system will use the specified value as the primary static hostname, while transient hostnames are used for boot fallbacks and other temporary settings.",
+  "err": "\n\u001b[2m  1 devdocs man · hostnamectl (1)   22.5s\u001b[0m\n"
+ },
+ "how do I enable a systemd service so it starts at boot": {
+  "ans": "To enable a systemd service to start at boot, you must use the `--now` switch in conjunction with the `enable` command. This allows the service to be activated immediately upon system startup rather than waiting for the network to be up or for a reboot.",
+  "err": "\n\u001b[2m  1 Arch Wiki · Systemd   8.7s\u001b[0m\n"
+ },
+ "how do I add a new user with useradd": {
+  "ans": "useradd creates a new user account by specifying the username, password, and home directory using the -u, -p, and -d options respectively.",
+  "err": "\n\u001b[2m  1 devdocs man · useradd (8)\n  2 devdocs man · groupadd (8)   5.9s\u001b[0m\n"
+ },
+ "how do I resize an ext4 filesystem": {
+  "ans": "To resize an ext4 filesystem, you can use the `resize2fs` command with the `-b` flag to convert it to 64-bit mode, or specify a specific size parameter directly. Ensure the partition is checked and optimized using `e2fsck` before resizing, and that metadata checksums are enabled on the filesystem.",
+  "err": "\n\u001b[2m  1 Arch Wiki · Ext4\n  2 devdocs man · ext4 (5)   10.4s\u001b[0m\n"
+ },
+ "how do I mount a filesystem by UUID in fstab": {
+  "ans": "To mount a filesystem by UUID in fstab, you must specify the UUID as the LABEL parameter alongside the device name or directory path. For example, if your UUID is `b411dc99-f0a0-4c87-9e05-184977be8539`, you would enter `LABEL=b411dc99-f0a0-4c87-9e05-184977be8539 /home ext4` in the fstab file.",
+  "err": "\n\u001b[2m  1 Arch Wiki · Fstab\n  2 devdocs man · mount (8)   33.9s\u001b[0m\n"
+ },
+ "how do I enable the en_US.UTF-8 locale": {
+  "ans": "To enable the en_US.UTF-8 locale, uncomment the corresponding entry in `/etc/locale.gen` and run `locale-gen`.",
+  "err": "\n\u001b[2m  1 Arch Wiki · Locale   5.5s\u001b[0m\n"
+ },
+ "how do I let a user run commands with sudo": {
+  "ans": "To allow a user like archie to run commands with sudo, you must create an entry in the `/etc/sudoers.d/` file that specifies their hostname and group membership. For example, you can add `archie hostname = (ALL:ALL)` to the file to grant them full access to all users and groups on the machine.",
+  "err": "\n\u001b[2m  1 Arch Wiki · Sudo\n  2 devdocs man · sudoers (5)   10.7s\u001b[0m\n"
+ },
+ "how do I undo the last commit but keep my changes": {
+  "ans": "To undo the last commit while keeping your changes, use the `git reset --hard` command with the `-N` flag to mark removed paths as intent-to-add.",
+  "err": "\n\u001b[2m  1 devdocs git · git reset\n  2 devdocs man · git-reset (1)   6.6s\u001b[0m\n"
+ },
+ "how do I change the message of my last commit": {
+  "ans": "To change the message of your last commit, you must first stage all files in the working directory using `git add .`, then run the commit command with a new message using `git commit -m 'new message'`.",
+  "err": "\n\u001b[2m  1 Wikipedia · Commit (version control)\n  2 devdocs man · git-commit (1)\n  3 devdocs git · git commit   7.6s\u001b[0m\n"
+ },
+ "how do I create a docker image tag for a registry": {
+  "ans": "To create a docker image tag for a private registry, you must use the `docker tag` command with the registry hostname and port specified (e.g., `docker tag 0e5574283393 myregistryhost:5000/fedora/httpd:version1.0`).",
+  "err": "\n\u001b[2m  1 devdocs docker · docker tag   10.0s\u001b[0m\n"
+ },
+ "how do I add a login role with a password in postgresql": {
+  "ans": "To add a login role with a password in PostgreSQL, you must use the `CREATE ROLE` command with the `LOGIN` clause to specify the password, followed by the `GRANT` command to grant privileges to that role.",
+  "err": "\n\u001b[2m  1 devdocs postgresql · CREATE ROLE\n  2 Arch Wiki · PostgreSQL\n  3 devdocs postgresql · ALTER ROLE   7.9s\u001b[0m\n"
+ },
+ "how do I create a virtual environment in python": {
+  "ans": "To create a virtual environment in Python, you can use the `virtualenv` command with the `-p` option to specify a Python version (e.g., `-p 3.8`) or `-p pypy3`. Alternatively, you may need to install pip first using `pip install -r requirements.txt`, then run `virtualenv` in your terminal.",
+  "err": "\n\u001b[2m  1 Arch Wiki · Python/Virtual environment\n  2 Arch Wiki · Python\n  3 devdocs python · 12. Virtual Environments and Packages   11.1s\u001b[0m\n"
+ },
+ "what does unwrap_or_default return on an Option": {
+  "ans": "not found",
+  "err": "tny: rejected — command not in reference: unwrap_or_default\n"
+ },
+ "how does bash substitute a default value if a variable is unset": {
+  "ans": "Bash substitutes a default value for an unset variable by using parameter substitution syntax, such as `${variable:-\"default\"}`, which evaluates to the specified default string if the variable is not defined.",
+  "err": "\n\u001b[2m  1 devdocs man · bash (1)\n  2 devdocs bash · Bash Variables   7.2s\u001b[0m\n"
+ },
+ "what does the --oneline flag do in git log": {
+  "ans": "The `--oneline` flag is a shorthand for the `--pretty=oneline --abbrev-commit` options, which formats commit objects as a single line with only the author and date.",
+  "err": "\n\u001b[2m  1 devdocs git · git log\n  2 devdocs man · git-log (1)   6.9s\u001b[0m\n"
+ },
+ "what arguments does json.dumps take": {
+  "ans": "json.dumps takes several optional arguments including `skipkeys`, `ensure_ascii`, `check_circular`, `allow_nan`, `cls`, `indent`, `separators`, `default`, and `sort_keys`.",
+  "err": "\n\u001b[2m  1 devdocs python · json   7.4s\u001b[0m\n"
+ },
+ "what precision does the numeric data type have in postgresql": {
+  "ans": "Based on the reference material, PostgreSQL uses the `numeric` data type which consists of two-, four-, and eight-byte integers with variable-precision, inexact, smallserial, autoincrementing integer, serial, bigserial, or large serial types. The precision is defined as the total count of significant digits in the whole number, while the scale is the count of decimal digits in the fractional part to the right of the decimal point.",
+  "err": "\n\u001b[2m  1 devdocs postgresql · Numeric Types   12.8s\u001b[0m\n"
+ },
+ "what does the --rm option do in docker run": {
+  "ans": "The `--rm` option automatically removes the container when it exits.",
+  "err": "\n\u001b[2m  1 devdocs docker · docker run\n  2 Arch Wiki · Docker\n  3 devdocs docker · Docker run reference   4.1s\u001b[0m\n"
+ },
+ "why does ./script.sh give permission denied but bash script.sh works": {
+  "ans": "bash script.sh is a standalone executable file that can be run directly without requiring a shell session, whereas `./script.sh` invokes a Bash process that may have restricted permissions or requires elevated privileges.",
+  "err": "\n\u001b[2m  1 unix.stackexchange · Run ./script.sh vs bash script.sh - permission denied   7.0s\u001b[0m\n"
+ },
+ "ssh gives connection refused what does that mean": {
+  "ans": "The error \"ssh Connection refused\" indicates that the server you are trying to connect to is not currently accepting connections, even though it appears to be running. This typically means the server's listening port is closed or blocked by firewall rules, preventing the SSH client from establishing a handshake.",
+  "err": "\n\u001b[2m  1 unix.stackexchange · ssh Connection refused: how to troubleshoot?   8.8s\u001b[0m\n"
+ },
+ "how do I find out which processes are preventing unmounting of a device": {
+  "ans": "To identify processes blocking device unmounting, you can use `lsof` to list open file descriptors associated with the device, or `fuser -mv /path/to/mountpoint` to dump all processes using that mountpoint.",
+  "err": "\n\u001b[2m  1 unix.stackexchange · How do I find out which processes are preventing unmounting of a device?\n  2 devdocs man · mount (8)   19.9s\u001b[0m\n"
+ },
+ "bash syntax error near unexpected token done": {
+  "ans": "The error indicates a syntax issue in the Bash script where the escape sequence `'\\r'` is being interpreted incorrectly by the shell. To resolve this, you can use the `dos2unix` command to convert the script to Unix line endings before running it.",
+  "err": "\n\u001b[2m  1 unix.stackexchange · bash pipeline: syntax error near unexpected token &apos;else&apos;\n  2 unix.stackexchange · &apos;while read line do&apos; cause: &quot;syntax error near unexpected token `done&apos;&quot; in Linux bash script   8.5s\u001b[0m\n"
+ },
+ "what does exit code 127 mean": {
+  "ans": "Exit code 127 in the context of systemd indicates that a service failed to start due to an error related to the `ExecStart` or `ExecStop` settings. This specific error typically occurs when a script is invoked but fails to execute properly, often because the script does not have the necessary permissions or the required arguments are missing.",
+  "err": "\n\u001b[2m  1 unix.stackexchange · How do I get the list of exit codes (and/or return codes) and meaning for a command/utility?   10.6s\u001b[0m\n"
+ },
+ "ssh says host key verification failed what do I do": {
+  "ans": "To resolve the \"Host key verification failed\" error, first delete the offending line from ~/.ssh/known_hosts to clear local cache, then run `su -s /bin/bash` with the `-E` flag to force a fresh system-wide cache. If this does not work, check for any other cached host keys in `/etc/ssh/ssh_known_hosts`.",
+  "err": "\n\u001b[2m  1 unix.stackexchange · &quot;Host key verification failed&quot; even with removed ~/.ssh/known_hosts   10.9s\u001b[0m\n"
+ },
+ "disk space not freed after deleting a large log file": {
+  "ans": "The reference material indicates that disk space is not freed up when deleting files on a hard drive, as evidenced by the specific question about a NAS where 44 Gb of files occupy 56 Gb of available space.",
+  "err": "\n\u001b[2m  1 unix.stackexchange · Disk space is not freed up when deleting files on a hard drive\n  2 unix.stackexchange · After deleting &quot;database-wal&quot; file from kactivitymanagerd which suddently had a size of several GBs disk space is not freed up\n  3 unix.stackexchange · Disk full after deleting large files and rebooting   7.8s\u001b[0m\n"
+ },
+ "rm gives argument list too long": {
+  "ans": "To resolve the \"argument list too long\" error when using `rm`, you should avoid passing the entire find command as a single argument. Instead, use a loop to process the output of the find command line by line, or pipe the results through a temporary file where each line is processed individually. For example, you can use:\n\n```bash\nfind /home/domain/imap/domain.com/*/Maildir -mtime +190 | while read; do rm -f \"$@\"; done\n```\n\nThis approach avoids passing the full command to `rm` at once, which causes the error.",
+  "err": "\n\u001b[2m  1 unix.stackexchange · Delete files specified by the output of find: rm thinks argument list is too long.\n  2 unix.stackexchange · Argument list too long error with makefile   17.2s\u001b[0m\n"
+ },
+ "no space left on device but there is plenty of free space": {
+  "ans": "The error \"no space left on device\" with 320 GB free indicates that the filesystem is full, even though the user believes they have sufficient space. This can be caused by a corrupted file system or insufficient free space on the disk itself.",
+  "err": "\n\u001b[2m  1 unix.stackexchange · No space left on device, with 320 GB free\n  2 unix.stackexchange · Docker says &quot;no space left on device&quot; but, system has plenty of space?\n  3 unix.stackexchange · Diagnose on ubuntu 16 OSError: [Errno 28] No space left on device: but actually plenty of space   23.7s\u001b[0m\n"
+ },
+ "command not found even though the program is installed and in my path": {
+  "ans": "To resolve a command not found error despite it being installed, you must verify that the executable exists in your current working directory and is actually located within your PATH variable.",
+  "err": "\n\u001b[2m  1 unix.stackexchange · sh: 1: program not found   6.2s\u001b[0m\n"
+ },
+ "what is the difference between symbolic and hard links": {
+  "ans": "Symbolic links are paths to files or directories that point to another location, whereas hard links are direct names to the same file. Hard links cannot link to a target on a different volume or file system, but symbolic links can. Additionally, hard links always refer to an existing target, whereas symbolic links might be a path to nothing.",
+  "err": "\n\u001b[2m  1 Wikipedia · Symbolic link   23.7s\u001b[0m\n"
+ },
+ "why do some shell scripts use exec to run commands": {
+  "ans": "Exec replaces the shell in place, making the executed program a direct child of the shell's parent rather than a grandchild through the shell. This is critical for embedded systems with limited RAM where the shell does not exist and cannot wait for the forked process to complete.",
+  "err": "\n\u001b[2m  1 unix.stackexchange · Why do some Linux shell scripts use exec to run commands?   8.4s\u001b[0m\n"
+ },
+ "what is wrong with parsing the output of ls": {
+  "ans": "The primary security concern regarding parsing `ls` output is that file names can be easily modified or altered, making it impossible to reliably count files without a secure method. Additionally, the command `ls -la | wc -l` is discouraged because the `-la` flag includes hidden files and directories, which can lead to incorrect results if not handled carefully.",
+  "err": "\n\u001b[2m  1 unix.stackexchange · Why *not* parse `ls` (and what to do instead)?   10.9s\u001b[0m\n"
+ },
+ "what is the difference between SIGTERM and SIGKILL": {
+  "ans": "SIGTERM signals the termination of a process by sending it a signal to terminate, while SIGKILL sends an immediate interrupt that causes the process to be killed without allowing for graceful shutdown.",
+  "err": "\n\u001b[2m  1 Wikipedia · SIGTERM\n  2 Wikipedia · SIGKILL   12.3s\u001b[0m\n"
+ },
+ "how many moons does jupiter have": {
+  "ans": "Jupiter has 115 known moons as of April 9, 2026, which excludes a number of meter-sized moonlets thought to be shed from its rings. The remainder are outer irregular satellites with high inclinations and eccentricities.",
+  "err": "\n\u001b[2m  1 Wikipedia · Moons of Jupiter   8.6s\u001b[0m\n"
+ },
+ "how fast can a cheetah run": {
+  "ans": "Cheetahs have been reliably reported running at speeds up to 104 km/h (65 mph), with an average adult speed of approximately 98 km/h (61 mph).",
+  "err": "\n\u001b[2m  1 Wikipedia · Cheetah   7.2s\u001b[0m\n"
+ },
+ "how tall is mount kilimanjaro": {
+  "ans": "Mount Kilimanjaro is located at an elevation of 5,895 meters (19,341 feet).",
+  "err": "\n\u001b[2m  1 Wikipedia · Mount Damavand\n  2 Wikipedia · Mount Elbrus   5.4s\u001b[0m\n"
+ },
+ "when did the berlin wall fall": {
+  "ans": "The Berlin Wall fell on November 9, 1989, at 18:53–19:01 CET, marking the end of East German reunification and the beginning of West German independence.",
+  "err": "\n\u001b[2m  1 Wikipedia · Fall of the Berlin Wall\n  2 Wikipedia · Berlin Wall   7.9s\u001b[0m\n"
+ },
+ "what is the chemical formula of table salt": {
+  "ans": "Table salt is chemically known as sodium chloride (NaCl), which consists of one sodium atom and one chlorine atom bonded together by ionic bonds.",
+  "err": "\n\u001b[2m  1 Wikipedia · Chemical compound   5.9s\u001b[0m\n"
+ },
+ "who discovered penicillin": {
+  "ans": "Alexander Fleming discovered penicillin in 1928, while Ernst Chain and Edward Abraham later identified the specific enzymes responsible for its resistance.",
+  "err": "\n\u001b[2m  1 Wikipedia · Penicillin\n  2 Wikipedia · Alexander Fleming   5.9s\u001b[0m\n"
+ },
+ "who painted the mona lisa": {
+  "ans": "The Mona Lisa was painted by Leonardo da Vinci.",
+  "err": "\n\u001b[2m  1 Wikipedia · Mona Lisa\n  2 Wikipedia · Lisa del Giocondo\n  3 Wikipedia · Leonardo da Vinci   3.5s\u001b[0m\n"
+ },
+ "how long is a marathon race": {
+  "ans": "A marathon race is typically 42.195 kilometers (26 miles) in length.",
+  "err": "\n\u001b[2m  1 Wikipedia · Marathon\n  2 Wikipedia · Long-distance running   14.9s\u001b[0m\n"
+ },
+ "how does photosynthesis work": {
+  "ans": "Photosynthesis is a system of biological processes where photopigment-bearing autotrophic organisms, such as plants, algae, and cyanobacteria, convert light energy into chemical energy. This process typically involves the splitting of water molecules to release oxygen as a byproduct, which powers the conversion of carbon dioxide and sunlight into complex organic compounds for metabolic fuel.",
+  "err": "\n\u001b[2m  1 Wikipedia · Photosynthesis   10.7s\u001b[0m\n"
+ },
+ "what causes ocean tides": {
+  "ans": "Ocean tides are primarily driven by the gravitational tidal forces exerted by the Moon upon the Earth, though they are also substantially modulated by the Sun's tidal forces and the rotation of the Earth.",
+  "err": "\n\u001b[2m  1 Wikipedia · Ocean\n  2 Wikipedia · Tide   7.2s\u001b[0m\n"
+ },
+ "why is the sky blue": {
+  "ans": "Sky Blue Sky was released by Wilco in 2007 and debuted at number four on the U.S. Billboard 200, selling 87,000 copies domestically in its first week.",
+  "err": "\n\u001b[2m  1 Wikipedia · Sky Blue Sky   7.6s\u001b[0m\n"
+ },
+ "what is plate tectonics": {
+  "ans": "Plate tectonics is the theory that describes how the lithosphere (the rigid outer layer of Earth) moves over the mantle, driven primarily by the gravitational pull of the oceanic crust and the buoyancy of the mantle. This movement is caused by the interaction between the subduction zone and the mantle wedge, which leads to the creation of new oceanic crust at divergent boundaries and the formation of mountain ranges at convergent boundaries.",
+  "err": "\n\u001b[2m  1 Wikipedia · Plate tectonics   12.6s\u001b[0m\n"
+ },
+ "how does a vaccine produce immunity": {
+  "ans": "Vaccines produce immunity by stimulating the immune system to generate specific antibodies against a pathogen, which can then neutralize the virus or bacteria. This process may occur through several mechanisms depending on the type of antibody involved, such as neutralizing the pathogen's ability to replicate or marking it for destruction.",
+  "err": "\n\u001b[2m  1 Wikipedia · Vaccine   9.6s\u001b[0m\n"
+ },
+ "how do you perform CPR on an adult": {
+  "ans": "Standard CPR is performed with the victim in a supine position, while prone CPR involves turning the head to the side to reduce aspiration risk.",
+  "err": "\n\u001b[2m  1 Wikipedia · Cardiopulmonary resuscitation   5.7s\u001b[0m\n"
+ },
+ "how do you make compost at home": {
+  "ans": "Composting at home can be achieved by using aerated static-pile composting systems, which involve placing mixed feedstocks on perforated piping with forced air circulation (positive or negative aeration) to maintain aerobic conditions. This method typically uses scrubbers like biofilters to remove odors and emissions before the material is processed.",
+  "err": "\n\u001b[2m  1 Wikipedia · Compost   9.9s\u001b[0m\n"
+ },
+ "how do I propagate a plant from cuttings": {
+  "ans": "Vegetative propagation is a cloning method where plants produce more offspring per unit of resource than reproduction through seed production, as meristematic cells capable of cellular differentiation are present in many plant tissues.",
+  "err": "\n\u001b[2m  1 Wikipedia · Vegetative reproduction   15.4s\u001b[0m\n"
+ },
+ "what is a kernel in corn": {
+  "ans": "Corn kernels are the dry, hard parts of the corn plant that contain the edible grain and are used for human consumption.",
+  "err": "\n\u001b[2m  1 Wikipedia · Sweet corn\n  2 Wikipedia · Corn tortilla   5.1s\u001b[0m\n"
+ },
+ "what is a shell in biology": {
+  "ans": "In biology, a shell is a protective covering formed by the fusion of bony elements and keratinous scutes, typically located on the dorsal or ventral surface of an animal.",
+  "err": "\n\u001b[2m  1 Wikipedia · Turtle shell   6.6s\u001b[0m\n"
+ },
+ "what is a cookie made of": {
+  "ans": "A zombie cookie is a piece of data created by a web server while a user is browsing, similar to regular HTTP cookies but designed to prevent deletion by the user.",
+  "err": "\n\u001b[2m  1 Wikipedia · Zombie cookie\n  2 Wikipedia · HTTP cookie\n  3 Wikipedia · HTTP cookie   6.3s\u001b[0m\n"
+ },
+ "how do python snakes kill their prey": {
+  "ans": "The reticulated python is an ambush predator that waits until prey wanders within strike range before seizing it in its coils and killing by constriction.",
+  "err": "\n\u001b[2m  1 Wikipedia · Reticulated python   5.7s\u001b[0m\n"
+ },
+ "how does the brain consolidate long term memory": {
+  "ans": "The hippocampus is essential for consolidating new information into long-term memory, but it also plays a role in the decay of existing memories.",
+  "err": "\n\u001b[2m  1 Wikipedia · Memory\n  2 Wikipedia · Spatial memory   5.7s\u001b[0m\n"
+ },
+ "what is a kernel in an operating system": {
+  "ans": "A kernel is a critical component of an operating system responsible for managing hardware resources and executing low-level code, allowing applications to interact with the computer's internal components.",
+  "err": "\n\u001b[2m  1 Wikipedia · Kernel (operating system)\n  2 Wikipedia · Kernel (operating system)   6.0s\u001b[0m\n"
+ },
+ "what is a shell in computing": {
+  "ans": "A shell in computing is a computer program that provides relatively broad and direct access to the system on which it runs, functioning as a thin layer around an operating system.",
+  "err": "\n\u001b[2m  1 Wikipedia · Shell (computing)\n  2 Wikipedia · Shell (computing)   6.1s\u001b[0m\n"
+ },
+ "what is an http cookie used for": {
+  "ans": "An HTTP cookie is a small block of data created by a web server while a user is browsing a website and placed on the user's computer or other device by the user's web browser.",
+  "err": "\n\u001b[2m  1 Wikipedia · HTTP cookie\n  2 Wikipedia · HTTP cookie   6.8s\u001b[0m\n"
+ },
+ "what is python the programming language": {
+  "ans": "Python is a multi-paradigm programming language that supports object-oriented, procedural, functional, structured, and reflective paradigms, often referred to as a \"glue language\" due to its ability to integrate components from other languages.",
+  "err": "\n\u001b[2m  1 Wikipedia · Python (programming language)\n  2 Wikipedia · Python (programming language)   8.0s\u001b[0m\n"
+ },
+ "what is virtual memory in a computer": {
+  "ans": "Virtual memory allows a computer to extend its physical memory beyond its capacity by using a page-sized virtual address space, enabling programs to access data stored in secondary storage.",
+  "err": "\n\u001b[2m  1 Wikipedia · Virtual memory\n  2 Wikipedia · Virtual memory\n  3 Wikipedia · Virtual memory compression   6.4s\u001b[0m\n"
+ }
+}

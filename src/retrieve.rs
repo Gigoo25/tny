@@ -36,7 +36,6 @@ re!(ITEM_TITLE = r"(?s)<title>(.*?)</title>");
 re!(ITEM_LINK = r"(?s)<link>(.*?)</link>");
 re!(ITEM_DESC = r"(?s)<description>(.*?)</description>");
 re!(CONTENT_BOOK = r"/content/([^/]+)");
-re!(TRAIL_PAREN = r"\s*\(.*\)$");
 // F14: the English _maxi ZIM is full of localised duplicates — half the candidate list.
 re!(LOCALISED = r"\((Magyar|Deutsch|Español|Français|Português|Italiano|Polski|Русский|简体|正體|日本語|한국어|Türkçe|Nederlands|Čeština|Ελληνικά|עברית|فارسی|العربية|Indonesia|Tiếng Việt|Norsk|Dansk|Svenska|Suomi|Română|Български|Українська|Hrvatski|Slovenčina|Lietuvių|Català)\)");
 
@@ -651,8 +650,11 @@ pub fn search_union(kiwix: &str, query: &str, books: &[String], per_book: usize)
     let mut out: Vec<Candidate> = Vec::new();
     let mut seen: Vec<String> = Vec::new();
     for rows in parts.into_iter().flatten().flatten() {
-        // dedupe per book: the same title in two books is two distinct answers
-        let key = format!("{}\u{0}{}", rows.book, TRAIL_PAREN.replace(&rows.title, ""));
+        // dedupe per book: the same title in two books is two distinct answers. The title is
+        // the whole key — stripping a trailing parenthetical collapsed "Mercury (planet)" into
+        // "Mercury (element)" and dropped one of them, and disambiguation is exactly how
+        // Wikipedia names distinct articles. F14's localised duplicates are LOCALISED's job.
+        let key = format!("{}\u{0}{}", rows.book, rows.title);
         if seen.contains(&key) {
             continue;
         }

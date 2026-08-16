@@ -43,23 +43,29 @@ export function factOf(needleRe) {
 const hasNum = (ans, n) => new RegExp(String.raw`(?<![\d.,])${n.replace(".", "\\.")}(?![\d])`).test(ans.replace(/,/g, ""));
 const hasWord = (ans, words) => words.some(w => new RegExp(String.raw`\b${w}`, "i").test(ans));
 
-// Four outcomes, and the difference between WRONG and REFUSED is the whole point of the
+// Five outcomes, and the difference between WRONG and REFUSED is the whole point of the
 // grounding rules (F27/F44/F45): a refusal is safe, a confident wrong answer is not.
 //   ok        the fact is in the answer
-//   REFUSED   the arm declined ("not found" / rejected)
+//   REFUSED   the model was asked and the grounding rules threw its answer away
+//   MISS      nothing was retrieved, so the model was never called (main.rs prints the same
+//             "not found" for both). Counting these as refusals credits the model with
+//             judgement it never exercised — the same defect F107 found for timeouts.
 //   WRONG     an answer that does not carry the fact
 //   ERROR     the arm never answered — F107: a 300 s request timeout on the 4B produced an
 //             empty answer, and counting those as refusals credited the model with judgement
 //             it never exercised. Infrastructure failures are their own column.
 export function verdictOf(ans, err, needleRe, expectRe) {
-  if (/chat request failed|chat body|chat json|kiwix|not responding/.test(err ?? "")) return "ERROR";
-  const refused = /^not found$/im.test(ans) || ans.trim() === "" || /rejected/.test(err ?? "");
+  // An answer on stdout outranks a note on stderr: the mount-drift warning (main.rs:1396)
+  // prints the word "kiwix" beside a perfectly good answer, and testing err first scored it
+  // ERROR. Infrastructure only decides the verdict when it cost us the answer.
+  const blank = ans.trim() === "";
+  if (blank && /chat request failed|chat body|chat json|kiwix|not responding/.test(err ?? "")) return "ERROR";
+  if (blank || /^not found$/im.test(ans)) return /rejected/.test(err ?? "") ? "REFUSED" : "MISS";
   // An authored `expectRe` grades the answer directly: it was written against the source
   // article to accept any paraphrase of the fact and reject the plausible wrong answer, which
   // the needle-derived rule cannot do. Cases without one fall back to that rule.
   const { num, words } = factOf(needleRe);
-  const correct = !refused && (expectRe ? expectRe.test(ans) : num === null ? hasWord(ans, words) : hasNum(ans, num));
-  return refused ? "REFUSED" : correct ? "ok" : "WRONG";
+  return (expectRe ? expectRe.test(ans) : num === null ? hasWord(ans, words) : hasNum(ans, num)) ? "ok" : "WRONG";
 }
 
 // One tally, one summary line, so two arms print comparable numbers.
@@ -67,20 +73,20 @@ export function tallyOf() {
   const t = {};
   return {
     add(set, verdict, ms) {
-      t[set] ??= { ok: 0, REFUSED: 0, WRONG: 0, ERROR: 0, n: 0, ms: 0 };
+      t[set] ??= { ok: 0, REFUSED: 0, MISS: 0, WRONG: 0, ERROR: 0, n: 0, ms: 0 };
       t[set][verdict]++;
       t[set].n++;
       t[set].ms += ms;
     },
     report(label) {
       console.log("");
-      let C = 0, R = 0, W = 0, E = 0, N = 0, ms = 0;
+      let C = 0, R = 0, M = 0, W = 0, E = 0, N = 0, ms = 0;
       for (const [set, r] of Object.entries(t)) {
-        const errs = r.ERROR ? ` errored ${r.ERROR}` : "";
-        console.log(`${set.padEnd(5)} correct ${r.ok}/${r.n} refused ${r.REFUSED} wrong ${r.WRONG}${errs} ${(r.ms / r.n / 1000).toFixed(1)}s per answer`);
-        C += r.ok; R += r.REFUSED; W += r.WRONG; E += r.ERROR; N += r.n; ms += r.ms;
+        const extra = `${r.MISS ? ` missed ${r.MISS}` : ""}${r.ERROR ? ` errored ${r.ERROR}` : ""}`;
+        console.log(`${set.padEnd(5)} correct ${r.ok}/${r.n} refused ${r.REFUSED} wrong ${r.WRONG}${extra} ${(r.ms / r.n / 1000).toFixed(1)}s per answer`);
+        C += r.ok; R += r.REFUSED; M += r.MISS; W += r.WRONG; E += r.ERROR; N += r.n; ms += r.ms;
       }
-      console.log(`TOTAL ${label} correct ${C}/${N} (${((C / N) * 100).toFixed(0)}%) refused ${R} wrong ${W}${E ? ` errored ${E}` : ""} ${(ms / N / 1000).toFixed(2)}s/answer ${(ms / 60000).toFixed(1)} min`);
+      console.log(`TOTAL ${label} correct ${C}/${N} (${((C / N) * 100).toFixed(0)}%) refused ${R} wrong ${W}${M ? ` missed ${M}` : ""}${E ? ` errored ${E}` : ""} ${(ms / N / 1000).toFixed(2)}s/answer ${(ms / 60000).toFixed(1)} min`);
     },
   };
 }

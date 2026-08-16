@@ -244,6 +244,11 @@ pub fn ungrounded_detail(answer: &str, reference: &str) -> String {
     let a = strip_think(answer);
     let ref_l = reference.to_lowercase();
     let has = |s: &str| ref_l.contains(&s.to_lowercase());
+    // F108: separators were stripped from the answer's number and never from the reference, so
+    // a reference "5,895 m" rejected a correct "5895" — the most likely benign transformation a
+    // model makes, punished as fabrication. Normalise both sides, once.
+    let strip = |s: &str| s.replace([',', '.', ' '], "");
+    let ref_n = strip(&ref_l);
 
     let mut nums: Vec<String> = Vec::new();
     for m in NUM.find_iter(&a) {
@@ -254,7 +259,7 @@ pub fn ungrounded_detail(answer: &str, reference: &str) -> String {
     }
     let bad: Vec<String> = nums
         .into_iter()
-        .filter(|x| !has(x) && !has(&x.replace(['.', ','], "")))
+        .filter(|x| !has(x) && !ref_n.contains(&strip(x)))
         .collect();
     if !bad.is_empty() {
         return format!("number not in reference: {}", bad.join(", "));
@@ -302,10 +307,13 @@ pub fn ungrounded_shape(answer: &str, q: &str, ref_cmds: &[String]) -> String {
     if !HOWTO.is_match(q.trim()) {
         return String::new();
     }
-    if !commands_in(a).is_empty() || ref_cmds.is_empty() {
+    if ref_cmds.is_empty() {
         return String::new();
     }
-    // a bare mention of any command the reference demonstrates counts as an answer
+    // F111: a backticked token was accepted as evidence on its own, so "you must use the
+    // `enable` command" passed — `enable` is not a command, and the reference documents
+    // `systemctl`. The token the answer proposes has to be one the reference demonstrates,
+    // whether it arrives marked up or bare.
     let al = a.to_lowercase();
     if ref_cmds.iter().any(|c| word_in(&al, &c.to_lowercase())) {
         return String::new();

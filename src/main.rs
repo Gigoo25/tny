@@ -966,7 +966,9 @@ fn answer_once(
     // on". Concatenation scored 5/6 against the rewrite's 4/6, and it is free. Only the
     // immediately previous question joins it — F84 widened the model's history, not this.
     let retrieval_q = match prev.last() {
-        Some((q, _)) => format!("{q} {question}"),
+        // The current question leads: `search_terms` cuts the query to its eight most
+        // informative terms, and with the previous question first its terms took the budget.
+        Some((q, _)) => format!("{question} {q}"),
         None => question.to_string(),
     };
 
@@ -1130,24 +1132,35 @@ fn answer_once(
     }
     let t_fetch = t.elapsed();
 
-    // The budget is split, not multiplied: the same ~3 KB of context, sourced from three
-    // articles. F41 measured that a bigger window does not buy accuracy — placement does.
-    let per_doc = top_sections(cfg).div_ceil(docs.len().max(1));
-    let mut parts = Vec::new();
-    let mut heads = Vec::new();
-    for (c, html) in &docs {
-        let p = pick_sections(html, &retrieval_q, per_doc, per_section(cfg));
-        if p.text.trim().is_empty() {
-            continue;
+    // The budget is split, not multiplied: the same context, sourced from three articles. F41
+    // measured that a bigger window does not buy accuracy — placement does.
+    let pick = |arts: usize, secs: usize| {
+        let docs = &docs[..arts.min(docs.len())];
+        let n = docs.len().max(1);
+        let mut parts = Vec::new();
+        let mut heads = Vec::new();
+        for (i, (c, html)) in docs.iter().enumerate() {
+            // Distribute exactly `secs`. `div_ceil` per document rounded *up* every time: 5
+            // sections over 3 articles was 6, 3787 chars against the 3000 the constant names,
+            // a fifth of every prefill spent on a section nobody budgeted.
+            let per_doc = secs / n + usize::from(i < secs % n);
+            if per_doc == 0 {
+                continue;
+            }
+            let p = pick_sections(html, &retrieval_q, per_doc, per_section(cfg));
+            if p.text.trim().is_empty() {
+                continue;
+            }
+            // Name the source inline: with three articles in context the model must be able to
+            // attribute, and the grounding check compares against the union below.
+            parts.push(format!("## {}\n{}", c.title, p.text));
+            heads.extend(p.heads);
         }
-        // Name the source inline: with three articles in context the model must be able to
-        // attribute, and the grounding check compares against the union below.
-        parts.push(format!("## {}\n{}", c.title, p.text));
-        heads.extend(p.heads);
-    }
-    let picked = retrieve::Picked { heads, text: parts.join("\n\n") };
+        retrieve::Picked { heads, text: parts.join("\n\n") }
+    };
+    let budget = (top_articles(cfg), top_sections(cfg));
     if cfg.context {
-        println!("{}", picked.text);
+        println!("{}", pick(budget.0, budget.1).text);
         return Ok(Answered { code: 0, text: String::new(), sources: vec![], shortlist: vec![] });
     }
 
@@ -1160,31 +1173,58 @@ fn answer_once(
 
     spin.say(if cfg.mode.generates() { "answering" } else { "reading" });
     let t = Instant::now();
-    // F95: ultrafast answers from the page itself. Nothing to ground, because nothing was
-    // written — the text is the source's own, and the grounding rules exist to catch a model
-    // saying more than its reference does.
-    let answer = if cfg.mode.generates() {
-        ask(cfg, question, &picked.text, &prev)?
+    // F82: one article and two sections carry the fact for 40 of 58 cases at ~310 prefill
+    // tokens, against 46/58 at ~913 — 69 % of questions answered for a third of the wall
+    // clock. The escalation trigger is not a new signal: the grounding rules already reject an
+    // answer its context does not support, and that rejection is exactly the request for more
+    // to read. This cannot lose ground, because the second rung IS the old single pass, and a
+    // rejected first rung used to end the turn at "not found" with nothing further tried.
+    let rungs: Vec<(usize, usize)> = if cfg.mode.generates() && budget.0 > 1 && budget.1 > 2 {
+        vec![(1, 2), budget]
     } else {
-        retrieve::best_passage(&picked.text, question)
+        vec![budget]
     };
+    let mut picked = retrieve::Picked { heads: Vec::new(), text: String::new() };
+    let mut answer = String::new();
+    let mut why = String::new();
+    for (arts, secs) in &rungs {
+        picked = pick(*arts, *secs);
+        // F95: ultrafast answers from the page itself. Nothing to ground, because nothing was
+        // written — the text is the source's own, and the grounding rules exist to catch a
+        // model saying more than its reference does.
+        answer = if cfg.mode.generates() {
+            ask(cfg, question, &picked.text, &prev)?
+        } else {
+            retrieve::best_passage(&picked.text, question)
+        };
+        // F27/F44/F45: three rules, each with its own reference. A false reject is the worst
+        // outcome — it turns a correct answer into "not found" — so each was tuned against
+        // correct answers as hard as against fabrications.
+        why = if cfg.mode.generates() {
+            [
+                ungrounded(&answer, &full, question, &picked.text),
+                ungrounded_detail(&answer, &full),
+                ungrounded_shape(&answer, question, &vocab),
+            ]
+            .into_iter()
+            .find(|r| !r.is_empty())
+            .unwrap_or_default()
+        } else {
+            String::new()
+        };
+        // F111: the deterministic rules ran and found nothing, so only now is the judge worth a
+        // call. It runs on every rung deliberately: on an early rung its "no" escalates, which
+        // costs context rather than the answer, and only the last rung's "no" is a refusal.
+        // Gating it on the last rung made it dead code — the ladder breaks at rung 1 whenever
+        // the deterministic rules pass, which is most questions.
+        if why.is_empty() && judged_offtopic(cfg, question, &answer) {
+            why = "answer is not about the question's subject".into();
+        }
+        if why.is_empty() {
+            break;
+        }
+    }
     let t_gen = t.elapsed();
-
-    // F27/F44/F45: three rules, each with its own reference. A false reject is the worst
-    // outcome — it turns a correct answer into "not found" — so each was tuned against
-    // correct answers as hard as against fabrications.
-    let why = if cfg.mode.generates() {
-        [
-            ungrounded(&answer, &full, question, &picked.text),
-            ungrounded_detail(&answer, &full),
-            ungrounded_shape(&answer, question, &vocab),
-        ]
-        .into_iter()
-        .find(|r| !r.is_empty())
-        .unwrap_or_default()
-    } else {
-        String::new()
-    };
 
     // F83: cite the articles the answer came from, not every article that was read. Three go
     // into context and "why is the sky blue" credited `Sky Blue Sky`, a Wilco album, because
@@ -1368,6 +1408,48 @@ fn ask(cfg: &Cfg, question: &str, reference: &str, prev: &[(String, String)]) ->
     Ok(content.to_string())
 }
 
+/// F111: the last resort, and the only rule that can see a *grounded* answer about the wrong
+/// thing. "why is the sky blue" answered from `Sky Blue Sky`, the Wilco album, is faithful to
+/// its reference — every number and identifier in it is there — so `ungrounded_detail` is blind
+/// by construction, and the question's terms are fully contained in the album's title, so no
+/// lexical check sees it either.
+///
+/// This is NOT F16's judge. That one chose among eight candidates and a 350M emitted a
+/// near-constant index; this reads one question and one answer, emits one token, and can only
+/// ever turn an answer into a refusal — it chooses nothing and it cannot invent. Opt-in until
+/// the number exists: `TNY_JUDGE=1`.
+///
+/// Positive phrasing only (F7: "Do NOT" measurably backfires).
+fn judged_offtopic(cfg: &Cfg, question: &str, answer: &str) -> bool {
+    if std::env::var("TNY_JUDGE").ok().as_deref() != Some("1") {
+        return false;
+    }
+    let body = serde_json::json!({
+        "messages": [{
+            "role": "user",
+            "content": format!(
+                "Question: {question}\nAnswer: {answer}\n\nIs that answer about the same subject the question asks about? Reply with one word, yes or no."
+            )
+        }],
+        "temperature": 0.0,
+        "max_tokens": 4,
+        "chat_template_kwargs": { "enable_thinking": false },
+    });
+    let Ok(resp) = ureq::post(&format!("{}/v1/chat/completions", cfg.chat))
+        .timeout(Duration::from_secs(120))
+        .set("Content-Type", "application/json")
+        .send_string(&body.to_string())
+    else {
+        return false; // a judge that cannot be reached must not reject anything
+    };
+    let Ok(text) = resp.into_string() else { return false };
+    let Ok(j) = serde_json::from_str::<serde_json::Value>(&text) else { return false };
+    let verdict = j["choices"][0]["message"]["content"].as_str().unwrap_or("").to_lowercase();
+    // Only an explicit "no" rejects. An empty or unparseable verdict is not evidence, and F16's
+    // failure mode was a model answering constantly — silence must cost nothing.
+    verdict.trim_start().starts_with("no")
+}
+
 // ------------------------------------------------------------------ servers
 
 fn on_path(bin: &str) -> bool {
@@ -1459,6 +1541,34 @@ fn stop_chat(cfg: &Cfg) {
     }
 }
 
+/// Physical cores, never logical. F3 measured a 4th thread on a 2-core box as *net negative*
+/// for decode (9.72 t/s against 3 threads' 11.09), and `available_parallelism` counts
+/// hyperthreads — on a P/E hybrid it also counts efficiency cores, and every ggml barrier then
+/// waits on the slowest one. `/proc/cpuinfo` lists a (physical id, core id) pair per logical
+/// CPU; the unique pairs are the cores. No `/proc`, or a kernel that omits the pair: trust
+/// `available_parallelism` and let `TNY_THREADS` be the answer.
+fn physical_cores() -> usize {
+    let fallback = || std::thread::available_parallelism().map_or(4, |n| n.get());
+    let Ok(txt) = std::fs::read_to_string("/proc/cpuinfo") else { return fallback() };
+    let mut cores: Vec<(String, String)> = Vec::new();
+    let (mut pkg, mut core) = (String::new(), String::new());
+    for line in txt.lines() {
+        let Some((k, v)) = line.split_once(':') else { continue };
+        match k.trim() {
+            "physical id" => pkg = v.trim().to_string(),
+            "core id" => core = v.trim().to_string(),
+            _ => continue,
+        }
+        if !pkg.is_empty() && !core.is_empty() {
+            let pair = (std::mem::take(&mut pkg), std::mem::take(&mut core));
+            if !cores.contains(&pair) {
+                cores.push(pair);
+            }
+        }
+    }
+    if cores.is_empty() { fallback() } else { cores.len() }
+}
+
 fn serve_chat(cfg: &Cfg) -> Result<(), String> {
     if !cfg.mode.generates() {
         return Ok(());
@@ -1484,7 +1594,10 @@ fn serve_chat(cfg: &Cfg) -> Result<(), String> {
         if !cfg.models.join(dir).is_dir() {
             eprintln!("tny: downloading {model} {size}, once, into {}", cfg.models.display());
         }
-        let threads = std::thread::available_parallelism().map_or(4, |n| n.get());
+        let threads = std::env::var("TNY_THREADS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or_else(physical_cores);
         let mut cmd = Command::new("llama-server");
         cmd.args(["-hf", model, "--no-mmproj", "--jinja", "--host", "127.0.0.1"])
             .args(["-t", &threads.to_string(), "-c", "8192", "--port", &CHAT_PORT.to_string()])

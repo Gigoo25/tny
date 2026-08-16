@@ -1,135 +1,70 @@
 #!/usr/bin/env bun
+// Retrieval precision on questions nobody here wrote, over pages the fixture never pinned.
+//
+// What this used to be, and why it was thrown away (F108): the query was the target page's own
+// title, and the check was `ctx.includes(title.slice(0, 40))` against a context that prints the
+// title of every retrieved article — so it passed whenever the page reached the top three, on a
+// query that was the answer key. The "leak-free" body arm fed 220 verbatim characters of the
+// target document, which carry ~20 terms that occur in exactly one page in the corpus; BM25
+// cannot lose. It scored 55/57 and 54/57 while the human-written fixture scored rank-1 34/58,
+// and when man pages cost six end-to-end answers it reported no change at all. A guard that
+// cannot fail is not a guard.
+//
+// What it is now: the query is the Stack Exchange question *slug* — words a real user typed,
+// which is where these pages came from — and the metric is strict rank-1 on the target path,
+// the same metric rank-cli.mjs uses. Directly comparable to its 34/58.
+//
+// What it still is not: a generalisation test. The slug is the page's own title, so this
+// measures whether ranking finds a page from its own words, not whether it survives a
+// paraphrase. Paraphrases have to be written without sight of the page, and nothing in bench/
+// produces one. Until they exist, the 58-case fixture is the only evidence of generalisation
+// in this repo, and it has none.
 import { TNY_ENV } from "./env.mjs";
-// Held-out measurement on pages nobody in this repo chose.
-//
-// The 58 hand-built cases are a regression guard: every scorer weight was tuned against them,
-// so they cannot answer "does this work on a question we have never seen". This harness draws
-// its sample from the ZIM index (`zimdump list`), so the engine under test has no say in what
-// it is asked, and nothing here is ever tuned against.
-//
-// Regenerate the sample (deterministic — `--random-source=/dev/zero`):
-//
-//   for z in <se-books>;  do zimdump list zim/$z.zim | grep -E '^questions/[0-9]+/.' \
-//     | shuf --random-source=/dev/zero -n 20 | sed "s|^|se\t$z\t|";  done > bench/holdout.tsv
-//   for z in <ref-books>; do zimdump list zim/$z.zim | grep -E '^[A-Za-z][^/]*$' \
-//     | shuf --random-source=/dev/zero -n 10 | sed "s|^|ref\t$z\t|"; done >> bench/holdout.tsv
-//
-// Three arms, because "did retrieval work" means different things per question shape:
-//
-//   title  Stack Exchange question, queried by its own title. LEAKY — retrieval is handed the
-//          page's exact wording — so it is an upper bound, not accuracy.
-//   body   the same question, queried by the asker's own description of the problem. Real
-//          human phrasing of the same need, never the title, so the leak is gone. This is the
-//          number that predicts day-to-day use: nobody types a well-formed page title.
-//   ref    Wikipedia / Arch wiki / devdocs page, queried by its title. Tests routing across
-//          every mounted book at once, which is the entity-lookup shape.
-//
-// And for the SE arms, given the page was routed at all:
-//
-//   evidence  does the slice we send carry the answer's own rare terms. Leak-free by
-//             construction — the page already matched — so it measures section selection.
-const K = process.env.TNY_KIWIX ?? "http://127.0.0.1:8082";
-const SHOW = process.argv.includes("--show");
-const LIST = process.argv.find(a => a.endsWith(".tsv")) ?? "bench/holdout.tsv";
-const ARM = process.argv.find(a => ["title", "body", "ref"].includes(a));
 
-const STOP = new Set(("the and for are was were with that this from have has been into than then when what which about their there these those being other also more most some such only over after before between using used use its his her you your they them will would could should here into onto upon while where whose whom does did done can may might must shall very just like each both any all not but our out off per via etc really much many make made need needed want first second another thing things something anything would could there").split(" "));
+const ARM = process.argv.slice(2).find(a => !a.startsWith("-"));
+const rows = (await Bun.file("bench/holdout.tsv").text())
+  .split("\n")
+  .filter(Boolean)
+  .map(l => l.split("\t"))
+  .filter(([arm]) => !ARM || arm === ARM);
 
-// Pages are titled "<question> - <site display name>", and the display name is only knowable
-// from the catalog: cooking.stackexchange.com is "Cooking Q&A (Seasoned Advice)", and pages
-// carry the parenthesised half. Feeding that suffix as the query measures boilerplate
-// handling, not retrieval.
-const catalog = await (await fetch(`${K}/catalog/search?count=-1`)).text();
-const SITE = catalog.split("<entry>").slice(1).map(e => ({
-  name: (e.match(/<name>([^<]+)<\/name>/) ?? [])[1] ?? "",
-  title: ((e.match(/<title>([^<]+)<\/title>/) ?? [])[1] ?? "").replace(/&amp;/g, "&").trim(),
-}));
-const suffixesOf = (book) => {
-  const t = SITE.find(s => s.name && book.startsWith(s.name))?.title ?? "";
-  return [(t.match(/\(([^)]+)\)/) ?? [])[1], t.replace(/\s*\([^)]*\)\s*/g, " ").trim(), t]
-    .filter(Boolean).sort((a, b) => b.length - a.length);
+// questions/10012/non-case-sensitive-sed-openwrt -> "non case sensitive sed openwrt". The
+// numeric id is not a query term and a real user never types it. A reference page's path often
+// ends in `index`, which is the directory's name, not the page's: take the segment before it.
+const queryOf = path => {
+  const parts = path.replace(/\.html?$/, "").split("/").filter(Boolean);
+  const last = parts.pop();
+  const seg = last === "index" && parts.length ? parts.pop() : last;
+  return seg.replace(/[-_]+/g, " ").replace(/\b\d+\b/g, "").trim();
 };
-const strip = (raw, book) => suffixesOf(book)
-  .reduce((s, x) => s.replace(new RegExp(`\\s*[-–|]\\s*${x.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*$`, "i"), ""), raw)
-  .replace(/\s*[-–|]\s*[^-–|]{0,40}(Stack Exchange|Ask Ubuntu|Stack Overflow|Super User)\s*$/i, "").trim();
 
-function evidenceTerms(answer, asked) {
-  const seen = new Set(asked.toLowerCase().match(/[a-z0-9_.\-]{3,}/g) ?? []);
-  const freq = {};
-  for (const w of answer.toLowerCase().match(/[a-z0-9_.\-]{5,}/g) ?? []) {
-    if (STOP.has(w) || seen.has(w)) continue;
-    freq[w] = (freq[w] ?? 0) + 1;
-  }
-  return Object.entries(freq).sort((a, b) => b[1] - a[1]).slice(0, 12).map(([w]) => w);
-}
-
-const ctxFor = async (q) => {
-  const p = Bun.spawn(["./target/release/tny", "--context", q], { env: TNY_ENV, stdout: "pipe", stderr: "pipe" });
+const one = async ([arm, book, path]) => {
+  const query = queryOf(path);
+  const p = Bun.spawn(["./target/release/tny", "--rank", query], { env: TNY_ENV, stdout: "pipe", stderr: "pipe" });
   const out = await new Response(p.stdout).text();
+  await new Response(p.stderr).text();
   await p.exited;
-  return out.toLowerCase();
+  const hits = out.trim().split("\n").filter(Boolean).map(l => l.split("\t"));
+  // Match on the path, not the title: the title has to be fetched, and the path is what tny
+  // would read. Book ids carry a date suffix the shortlist may print differently.
+  const at = hits.findIndex(([b = "", , pth = ""]) => pth === path && b.startsWith(book.split("_20")[0]));
+  return { arm, query, at, n: hits.length };
 };
 
-const rows = (await Bun.file(LIST).text()).trim().split("\n").map(l => l.split("\t"));
-const tally = { title: [0, 0], body: [0, 0], ref: [0, 0] };
-let evid = 0, evidN = 0, unusable = 0;
-
-for (const [kind, book, path] of rows) {
-  if (ARM && !(ARM === "ref" ? kind === "ref" : kind === "se")) continue;
-  const html = await (await fetch(`${K}/content/${book}/${path}`)).text();
-  const title = strip(((html.match(/<title>([^<]+)<\/title>/) ?? [])[1] ?? "")
-    .replace(/&#(\d+);/g, (_, d) => String.fromCharCode(+d)).replace(/&[a-z]+;/g, "'"), book);
-  const text = html.replace(/<script[\s\S]*?<\/script>/g, " ").replace(/<style[\s\S]*?<\/style>/g, " ")
-    .replace(/<[^>]+>/g, " ").replace(/&[a-z]+;/g, " ").replace(/\s+/g, " ");
-  if (!title || title.length < 10) { unusable++; continue; }
-  // The page has to be findable in principle: if its own title is not in the context, no arm
-  // of this measurement can distinguish ranking from a missing page.
-  const hit = (ctx) => ctx.includes(title.toLowerCase().slice(0, 40));
-
-  if (kind === "ref") {
-    if (ARM && ARM !== "ref") continue;
-    const ok = hit(await ctxFor(title));
-    tally.ref[0] += ok ? 1 : 0;
-    tally.ref[1]++;
-    if (SHOW) console.log(`${ok ? "REF  ok  " : "REF  MISS"} ${title.slice(0, 62)}`);
-    continue;
-  }
-
-  // Posts are `<div class="s-prose js-post-body">`: the first is the question, the rest are
-  // answers. Text-marker heuristics ("N Answers N") match the page chrome instead, which is
-  // how an earlier run of this harness reported a flat 0 % and meant nothing.
-  const posts = html.split(/class="[^"]*js-post-body[^"]*"/).slice(1)
-    // The split lands mid-tag, so the rest of the opening tag (`itemprop="text">`) is still
-    // attached and would be fed to the engine as query terms.
-    .map(s => s.replace(/^[^>]*>/, "").replace(/<[^>]+>/g, " ").replace(/&[a-z]+;/g, " ").replace(/\s+/g, " ").trim());
-  if (posts.length < 2 || posts[1].length < 200) { unusable++; continue; }
-  const answer = posts.slice(1).join(" ").slice(0, 2200);
-  // The asker's own words: how a person describes the problem, never how they headline it.
-  const body = posts[0].slice(0, 220);
-
-  if (!ARM || ARM === "title") {
-    const ctx = await ctxFor(title);
-    const ok = hit(ctx);
-    tally.title[0] += ok ? 1 : 0;
-    tally.title[1]++;
-    if (ok) {
-      const terms = evidenceTerms(answer, title);
-      const found = terms.filter(t => ctx.includes(t)).length;
-      evidN++;
-      if (found >= Math.max(3, Math.ceil(terms.length * 0.34))) evid++;
-    }
-  }
-  if ((!ARM || ARM === "body") && body.length > 60) {
-    const ok = hit(await ctxFor(body));
-    tally.body[0] += ok ? 1 : 0;
-    tally.body[1]++;
-    if (SHOW) console.log(`${ok ? "BODY ok  " : "BODY MISS"} ${body.slice(0, 58).padEnd(60)} -> ${title.slice(0, 40)}`);
-  }
+const results = [];
+for (let i = 0; i < rows.length; i += 4) {
+  results.push(...(await Promise.all(rows.slice(i, i + 4).map(one))));
 }
 
-const pct = ([a, b]) => `${a}/${b}${b ? ` (${Math.round((100 * a) / b)}%)` : ""}`;
-console.log(`\nheld-out  ${rows.length} pages, ${unusable} unusable`);
-console.log(`routed title  ${pct(tally.title)}  — leaky upper bound, query is the page's own title`);
-console.log(`routed body   ${pct(tally.body)}  — the asker's own words: what day-to-day use looks like`);
-console.log(`routed ref    ${pct(tally.ref)}  — wiki/devdocs entity lookup across every book`);
-console.log(`evidence      ${pct([evid, evidN])}  — section selection, given the page was routed`);
+const tally = {};
+for (const r of results) {
+  tally[r.arm] ??= { n: 0, rank1: 0, list: 0 };
+  tally[r.arm].n++;
+  if (r.at === 0) tally[r.arm].rank1++;
+  if (r.at >= 0) tally[r.arm].list++;
+  if (r.at !== 0) console.log(`${r.at < 0 ? "ABSENT" : `rank ${r.at + 1}`.padEnd(6)} ${r.arm} ${r.query}`);
+}
+console.log("");
+for (const [arm, t] of Object.entries(tally)) {
+  console.log(`${arm.padEnd(4)} rank-1 ${t.rank1}/${t.n}   in shortlist ${t.list}/${t.n}`);
+}
