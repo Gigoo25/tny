@@ -1,0 +1,234 @@
+{
+ "how do I change the hostname of my machine": {
+  "ans": "not found",
+  "err": "rejected \u2014 qa head abstained"
+ },
+ "how do I enable a systemd service so it starts at boot": {
+  "ans": "not found",
+  "err": "rejected \u2014 qa head abstained"
+ },
+ "how do I add a new user with useradd": {
+  "ans": "not found",
+  "err": "rejected \u2014 qa head abstained"
+ },
+ "how do I resize an ext4 filesystem": {
+  "ans": "To resize an ext4 filesystem to a specific size",
+  "err": ""
+ },
+ "how do I mount a filesystem by UUID in fstab": {
+  "ans": "not found",
+  "err": "rejected \u2014 qa head abstained"
+ },
+ "how do I enable the en_US.UTF-8 locale": {
+  "ans": "not found",
+  "err": "rejected \u2014 qa head abstained"
+ },
+ "how do I let a user run commands with sudo": {
+  "ans": "not found",
+  "err": "rejected \u2014 qa head abstained"
+ },
+ "how do I undo the last commit but keep my changes": {
+  "ans": "not found",
+  "err": "rejected \u2014 qa head abstained"
+ },
+ "how do I change the message of my last commit": {
+  "ans": "not found",
+  "err": "rejected \u2014 qa head abstained"
+ },
+ "how do I create a docker image tag for a registry": {
+  "ans": "not found",
+  "err": "rejected \u2014 qa head abstained"
+ },
+ "how do I add a login role with a password in postgresql": {
+  "ans": "not found",
+  "err": "rejected \u2014 qa head abstained"
+ },
+ "how do I create a virtual environment in python": {
+  "ans": "decide upon a directory where you want",
+  "err": ""
+ },
+ "what does unwrap_or_default return on an Option": {
+  "ans": "not found",
+  "err": "rejected \u2014 qa head abstained"
+ },
+ "how does bash substitute a default value if a variable is unset": {
+  "ans": "not found",
+  "err": "rejected \u2014 qa head abstained"
+ },
+ "what does the --oneline flag do in git log": {
+  "ans": "not found",
+  "err": "rejected \u2014 qa head abstained"
+ },
+ "what arguments does json.dumps take": {
+  "ans": "not found",
+  "err": "rejected \u2014 qa head abstained"
+ },
+ "what precision does the numeric data type have in postgresql": {
+  "ans": "not found",
+  "err": "rejected \u2014 qa head abstained"
+ },
+ "what does the --rm option do in docker run": {
+  "ans": "not found",
+  "err": "rejected \u2014 qa head abstained"
+ },
+ "why does ./script.sh give permission denied but bash script.sh works": {
+  "ans": "not found",
+  "err": "rejected \u2014 qa head abstained"
+ },
+ "ssh gives connection refused what does that mean": {
+  "ans": "try with another\n\n## what would cause SSH connection refused but not refuse an immediate subsequent attempt",
+  "err": ""
+ },
+ "how do I find out which processes are preventing unmounting of a device": {
+  "ans": "How",
+  "err": ""
+ },
+ "bash syntax error near unexpected token done": {
+  "ans": "not found",
+  "err": "rejected \u2014 qa head abstained"
+ },
+ "what does exit code 127 mean": {
+  "ans": "usually means the shell can't find the command",
+  "err": ""
+ },
+ "ssh says host key verification failed what do I do": {
+  "ans": "not found",
+  "err": "rejected \u2014 qa head abstained"
+ },
+ "disk space not freed after deleting a large log file": {
+  "ans": "not found",
+  "err": "rejected \u2014 qa head abstained"
+ },
+ "rm gives argument list too long": {
+  "ans": "not found",
+  "err": "rejected \u2014 qa head abstained"
+ },
+ "no space left on device but there is plenty of free space": {
+  "ans": "not found",
+  "err": "rejected \u2014 qa head abstained"
+ },
+ "command not found even though the program is installed and in my path": {
+  "ans": "not found",
+  "err": "rejected \u2014 qa head abstained"
+ },
+ "what is the difference between symbolic and hard links": {
+  "ans": "The symbolic link differs from the hard link",
+  "err": ""
+ },
+ "why do some shell scripts use exec to run commands": {
+  "ans": "not found",
+  "err": "rejected \u2014 qa head abstained"
+ },
+ "what is wrong with parsing the output of ls": {
+  "ans": "very bad results",
+  "err": ""
+ },
+ "what is the difference between SIGTERM and SIGKILL": {
+  "ans": "not found",
+  "err": "rejected \u2014 qa head abstained"
+ },
+ "how many moons does jupiter have": {
+  "ans": "There are 115 known moons of the planet Jupiter as of 9 April 2026",
+  "err": ""
+ },
+ "how fast can a cheetah run": {
+  "ans": "28 miles per hour (45 km/h; 13 m/s)",
+  "err": ""
+ },
+ "how tall is mount kilimanjaro": {
+  "ans": "altitude of 4,157 metres",
+  "err": ""
+ },
+ "when did the berlin wall fall": {
+  "ans": "Fall of the Berlin Wall",
+  "err": ""
+ },
+ "what is the chemical formula of table salt": {
+  "ans": "specifies the number of atoms of each element in a compound molecule",
+  "err": ""
+ },
+ "who discovered penicillin": {
+  "ans": "Alexander Fleming discovered the crude penicillin",
+  "err": ""
+ },
+ "who painted the mona lisa": {
+  "ans": "Leonardo da Vinci",
+  "err": ""
+ },
+ "how long is a marathon race": {
+  "ans": "more than 800 marathons are organized worldwide",
+  "err": ""
+ },
+ "how does photosynthesis work": {
+  "ans": "Root Wingspan",
+  "err": ""
+ },
+ "what causes ocean tides": {
+  "ans": "oceanic tides are also substantially modulated by the Sun's tidal forces",
+  "err": ""
+ },
+ "why is the sky blue": {
+  "ans": "Rayleigh scattering and Why is the sky blue",
+  "err": ""
+ },
+ "what is plate tectonics": {
+  "ans": "r-geomap AUR GPlates",
+  "err": ""
+ },
+ "how does a vaccine produce immunity": {
+  "ans": "Other pathogens that are combined in a conjugate vaccine to increase an immune response",
+  "err": ""
+ },
+ "how do you perform CPR on an adult": {
+  "ans": "People with no connection to the person are more likely to perform CPR than family members",
+  "err": ""
+ },
+ "how do you make compost at home": {
+  "ans": "not found",
+  "err": "rejected \u2014 qa head abstained"
+ },
+ "how do I propagate a plant from cuttings": {
+  "ans": "not found",
+  "err": "rejected \u2014 qa head abstained"
+ },
+ "what is a kernel in corn": {
+  "ans": "boiled sweet corn kernels are served hot with margarine and cheese powder",
+  "err": ""
+ },
+ "what is a shell in biology": {
+  "ans": "Galaxy",
+  "err": ""
+ },
+ "what is a cookie made of": {
+  "ans": "A cookie is made secure by adding the Secure flag to the cookie",
+  "err": ""
+ },
+ "how do python snakes kill their prey": {
+  "ans": "Live prey is constricted and killed",
+  "err": ""
+ },
+ "how does the brain consolidate long term memory": {
+  "ans": "more stable and permanent changes in neural connections",
+  "err": ""
+ },
+ "what is a kernel in an operating system": {
+  "ans": "A kernel is a component of a computer operating system",
+  "err": ""
+ },
+ "what is a shell in computing": {
+  "ans": "An operating system shell is a computer program that provides relatively broad and direct access to the system on which it runs",
+  "err": ""
+ },
+ "what is an http cookie used for": {
+  "ans": "is a small block of data created by a web server while a user is browsing a website and placed on the user's computer or other device by the user's web browser",
+  "err": ""
+ },
+ "what is python the programming language": {
+  "ans": "Python is a high-level , general-purpose programming language that emphasizes code readability , simplicity, and ease-of-writing with the use of significant indentation \u2026 and garbage collection",
+  "err": ""
+ },
+ "what is virtual memory in a computer": {
+  "ans": "not found",
+  "err": "rejected \u2014 qa head abstained"
+ }
+}

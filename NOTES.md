@@ -3002,3 +3002,45 @@ relevance; the answer sentence is the least query-like line on the page).
 
 So the ceiling stands where F79 left it: 49/58 = 84 % bounds end-to-end before a single model
 token, and 90 % is not reachable by ranking this corpus with these signals.
+
+## F115 — the extractive QA head, the last untested shape, loses by 28 cases
+
+F76 asked whether a 0.8B spending ~900 prefill tokens to emit ~40 is the right tool for "repeat
+the sentence you were handed". F79 answered it for every *relevance* model — bi-encoder 21/58, two
+cross-encoders 17-19/58 — and left exactly one shape unmeasured: a **SQuAD-tuned encoder**, trained
+for answerhood rather than relevance, returning a span in ~100-600 ms. llama.cpp cannot serve one
+(no span-classification head), so it needed a second runtime, which is why it stayed untested.
+
+`bench/qa-head.py`, `deepset/minilm-uncased-squad2` (33 M), reading the *identical* context tny
+hands its own model (`tny --context`, cached) and graded by `bench/grade.mjs` unchanged:
+
+```
+                                 correct   refused   wrong   per case
+0.8B generator (shipping)          39/58       3       16     7.8 s
+leadbest, no model (F76)           21/58       -        -     ~0
+qa head, span only                  8/58      28       22     550 ms
+qa head, span in its sentence       11/58      28       19     550 ms
+  inst 2/18 (16 abstentions)   qa 0/14   gen 6/16   amb 3/10
+```
+
+**Twenty-eight abstentions of fifty-eight**, and they are not spread evenly: `inst` abstains 16 of
+18 and `qa` 9 of 14, while `gen` — the one set that is encyclopedic factoids — abstains twice and
+scores 6/16. That is the finding. SQuAD2's null head is calibrated for "is this factoid present in
+this Wikipedia paragraph", and a man-page flag table, an `## Title`-chunked wiki slice, or a Stack
+Exchange answer is not that distribution. The task shape it was trained for is a *sixth* of this
+fixture.
+
+One decode bug found and fixed mid-measurement, worth recording because it flattered the null: the
+first pass pooled the null-span score across sliding windows with `max`, so a window that does not
+contain the answer vetoed a good span found in another (37 abstentions, 6/58). Compared per window
+it is 28 abstentions and 11/58. Still not close.
+
+Caveats, both real: one model at 33 M, and no fine-tuning on this distribution. `roberta-base-squad2`
+(125 M) would be 4x the cost against a generator already at 39/58 in 7.8 s, and a head fine-tuned
+on man pages and Stack Exchange is the open question F26 already lists. What is now measured is
+that an *off-the-shelf* extractive head is not the cheaper generator.
+
+**The generator stays, and it is no longer a matter of taste.** It beats every relevance ranker
+(F79), every model-free extractor by 18 cases (F76), and now a purpose-trained span extractor by
+28. Its 21-case contribution over `leadbest` is selection, not phrasing, and nothing measured so
+far does that selection better.
