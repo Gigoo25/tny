@@ -12,7 +12,7 @@ mod ground;
 mod retrieve;
 mod tui;
 
-use ground::{command_vocab, html2txt, split_compare, ungrounded, ungrounded_detail, ungrounded_shape};
+use ground::{ungrounded_subject, command_vocab, html2txt, split_compare, ungrounded, ungrounded_detail, ungrounded_shape};
 use retrieve::{article, pick_sections, prep, rank_articles, search_union, select_terms};
 use std::io::{IsTerminal, Read, Write};
 use std::path::PathBuf;
@@ -1205,6 +1205,7 @@ fn answer_once(
                 ungrounded(&answer, &full, question, &picked.text),
                 ungrounded_detail(&answer, &full),
                 ungrounded_shape(&answer, question, &vocab),
+                ungrounded_subject(&answer, question),
             ]
             .into_iter()
             .find(|r| !r.is_empty())

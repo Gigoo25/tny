@@ -44,6 +44,12 @@ re!(NOTFOUND = r"(?i)not found");
 re!(THINK = r"(?s)<think>.*?</think>");
 // F45: "how many" is not "how to"; "why did this fail" may legitimately be prose.
 re!(HOWTO = r"(?i)^(?:how (?:do|can|would) i|how to|what command)\b|^(?:create|set|mount|encrypt|generate|check|list|install|enable|configure|disable|remove|start|stop|make)\b");
+// F112: "what is X" asks about X, and an answer that defines a *qualified* X answers a
+// different question. `a zombie cookie is a piece of data`, `a turtle shell is made up of`.
+re!(DEF_Q = r"(?i)^\s*(?:what|which)\s+(?:is|are|was|were)\b");
+re!(DEF_A = r"(?i)\b(?:a|an|the)\s+([a-z][a-z0-9 /_.-]{0,40}?)\s+(?:is|are|was|were)\s");
+// Words that qualify nothing: a subject of "the small piece" names no subject at all.
+re!(SUBJ_SKIP = r"(?i)^(?:small|large|main|basic|simple|single|whole|entire|piece|type|kind|form|part|set|term|word|name|thing|value|file|data|text|way|use|used|user|system|computer)$");
 
 fn is_wordish(c: char) -> bool {
     c.is_ascii_alphanumeric() || c == '_' || c == '-'
@@ -325,6 +331,57 @@ fn strip_think(s: &str) -> String {
     THINK.replace_all(s, "").to_string()
 }
 
+
+/// F112: the wrong-page family no reference comparison can see. "what is a cookie made of"
+/// answered from `Zombie cookie` is *grounded* — every identifier in it is in its reference —
+/// and the question's terms are all present in the article's title, so no lexical check fires
+/// either. What gives it away is the answer's own definitional subject: it defines `zombie
+/// cookie`, and `zombie` is a word the question never used.
+///
+/// Definitional questions only. "why is the sky blue" is not one, so the Wilco album survives
+/// this rule — that one is `article@1`'s problem, not grounding's.
+pub fn ungrounded_subject(answer: &str, q: &str) -> String {
+    let stripped = strip_think(answer);
+    let a = stripped.trim();
+    if a.is_empty() || NOTFOUND.is_match(a) || !DEF_Q.is_match(q.trim()) {
+        return String::new();
+    }
+    let ql = q.to_lowercase();
+    let Some(c) = DEF_A.captures(a) else { return String::new() };
+    let subject = c.get(1).map_or("", |m| m.as_str()).to_lowercase();
+    // Every content word of the subject has to be a word the question used. One that is not is
+    // the qualifier that changed the question: corn/zombie/turtle.
+    let extra: Vec<&str> = subject
+        .split_whitespace()
+        .filter(|w| w.len() >= 3 && !SUBJ_SKIP.is_match(w) && !word_in(&ql, w))
+        .collect();
+    if extra.is_empty() {
+        return String::new();
+    }
+    format!("answer defines \"{subject}\", which the question did not ask about")
+}
+
+#[cfg(test)]
+mod subject {
+    use super::ungrounded_subject as sub;
+
+    #[test]
+    fn rejects_a_qualified_subject() {
+        // F112's two cases, verbatim from bench/.answers-f111.json.
+        assert!(!sub("A zombie cookie is a piece of data created by a web server.", "what is a cookie made of").is_empty());
+        assert!(!sub("The turtle shell is made up of bony elements.", "what is a shell in biology").is_empty());
+    }
+
+    #[test]
+    fn accepts_the_subject_asked_about() {
+        assert!(sub("A kernel is a critical component of an operating system.", "what is a kernel in an operating system").is_empty());
+        assert!(sub("An HTTP cookie is a small piece of data.", "what is an http cookie used for").is_empty());
+        // Definitional questions only: the album answer is article@1's problem, not this rule's.
+        assert!(sub("Sky Blue Sky is an album by Wilco.", "why is the sky blue").is_empty());
+        // No definitional clause at all.
+        assert!(sub("Virtual memory allows a computer to extend its main memory.", "what is virtual memory").is_empty());
+    }
+}
 #[cfg(test)]
 mod tests {
     use super::*;
