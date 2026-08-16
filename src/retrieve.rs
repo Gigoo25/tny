@@ -480,7 +480,15 @@ fn title_covered(c: &Candidate, t: &[String]) -> f64 {
         return 0.0;
     }
     let joined = t.join(" ");
-    if !words.iter().all(|w| joined.contains(w)) {
+    // F114: the substring test is load-bearing — it is the only stemming in the scorer, so a
+    // title word `link` is satisfied by the query's `links` and `mount` by `mounting`, and
+    // requiring word boundaries everywhere costs 2 cases (article@1 35 -> 33). The pathology is
+    // confined to short words, where a substring is an accident rather than a stem: `ip` inside
+    // `zip`, `go` inside `google`. Boundaries for those, substrings for the rest.
+    let matched = |w: &&str| {
+        if w.len() < 4 { crate::ground::word_in(&joined, w) } else { joined.contains(*w) }
+    };
+    if !words.iter().all(matched) {
         return 0.0;
     }
     // F54: a subset test alone promotes the most GENERIC article. "Docker" is one word,

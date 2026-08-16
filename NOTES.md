@@ -2962,3 +2962,43 @@ What survives: F112's post-answer rule, which measured correct 37 -> 39 and wron
 the conclusion that the sense-collision class belongs to **ranking** — `Zombie cookie` outranking
 `HTTP cookie` for "what is a cookie made of" is `article@1` (35/58), and no rule downstream of a
 bad rank-1 can do better than reject an answer that was already paid for.
+
+## F114 — the scorer is at a local optimum, and the weights were never the problem
+
+`article@1` at 35/58 is the constraint on everything: seven of the sixteen wrong answers are a
+grounded answer about the wrong page, and no rule downstream of a bad rank-1 can do better than
+reject an answer already paid for. The code audit named three suspects in `title_covered` and the
+Xapian prior. With the corpus finally on disk, `bench/rank-cli.mjs` costs 45 s and no model calls,
+so each was measured rather than argued:
+
+```
+                                          article@1   shortlist   book@1
+baseline: substring test, rank/5.0           35/58       49/58      47/58
+word boundaries everywhere                   33/58       47/58      45/58
+word boundaries on words < 4 chars only      35/58       49/58      47/58   <- shipped
+title word cap 5 -> 8                        35/58       49/58      47/58
+Xapian prior /3.0 (trust rank more)          34/58       49/58      46/58
+Xapian prior /8.0 (trust rank less)          32/58       49/58      45/58
+```
+
+**Every direction is neutral or worse.** Three findings:
+
+- **The substring test is the scorer's only stemming.** `joined.contains(w)` lets a title word
+  `link` be satisfied by the query's `links`, and `mount` by `mounting`. Requiring word boundaries
+  everywhere costs 2 cases. The pathology it was flagged for — `ip` inside `zip`, `go` inside
+  `google` — is confined to short words, so boundaries now apply below 4 characters and substrings
+  above. Free, and it closes an accident class the fixture happens not to contain.
+- **The >5-word title cap never binds.** A title with six to eight non-stopword words *all* of
+  which appear in the query does not occur. Reverted; it was never worth a case either way.
+- **F59's /5.0 is a real optimum**, not a guess that stuck: /3 costs a case and /8 costs three.
+
+The transferable conclusion: `in shortlist 49/58` against `article@1 35/58` is a **14-case
+ordering gap**, and no weight in this scorer closes it. F59 said the residual failures are synonym
+gaps lexical cannot reach — `Rayleigh scattering` for "why is the sky blue", `Udisks` for "mount a
+usb drive" — and this sweep confirms it from the other direction. What is missing is a *signal*,
+not a coefficient. The candidates are there; nothing in the pipeline knows which of them answers
+the question, which is the same gap F79 measured at the sentence level (relevance rankers rank
+relevance; the answer sentence is the least query-like line on the page).
+
+So the ceiling stands where F79 left it: 49/58 = 84 % bounds end-to-end before a single model
+token, and 90 % is not reachable by ranking this corpus with these signals.
