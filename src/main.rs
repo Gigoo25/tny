@@ -1,8 +1,9 @@
-//! tny — a small-model terminal answerer.
+//! tny — an offline terminal search engine.
 //!
-//! `tny "how do I create a swap file"` → grounded answer on stdout, source on stderr.
+//! `tny "how do I create a swap file"` → verbatim evidence from local ZIMs by default;
+//! explicit generation modes produce a grounded answer on stdout, with sources on stderr.
 //!
-//! The design is measured, not guessed: see NOTES.md (47 findings) and PLAN.md. The two
+//! The design is measured, not guessed: see NOTES.md (108 findings) and PLAN.md. The two
 //! load-bearing results are that the model must never *select* anything — every choice it
 //! was given lost to a deterministic rule — and that a regex grounding check, not a bigger
 //! model, is what stops a fabricated shell command being served as fact.
@@ -12,8 +13,14 @@ mod ground;
 mod retrieve;
 mod tui;
 
-use ground::{ungrounded_subject, command_vocab, html2txt, split_compare, ungrounded, ungrounded_detail, ungrounded_shape};
-use retrieve::{article, pick_sections, prep, rank_articles, search_union, select_terms};
+use ground::{
+    command_vocab, denoise, html2txt, prose_text, split_compare, ungrounded, ungrounded_detail,
+    ungrounded_shape, ungrounded_subject,
+};
+use retrieve::{
+    article, consensus_candidate, pick_sections, prep, rank_articles, search_book, search_union,
+    select_terms, title_matches_query, Intent,
+};
 use std::io::{IsTerminal, Read, Write};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
@@ -109,15 +116,24 @@ const MODEL: &str = MODELS[0].1;
 // size, and prefill is 19–22 s of a 20–40 s answer — so these are latency constants as much
 // as accuracy ones. Overridable so a sweep costs a run rather than a rebuild.
 fn top_sections(cfg: &Cfg) -> usize {
-    std::env::var("TNY_TOP_SECTIONS").ok().and_then(|v| v.parse().ok()).unwrap_or(cfg.mode.dims().1)
+    std::env::var("TNY_TOP_SECTIONS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(cfg.mode.dims().1)
 }
 fn per_section(cfg: &Cfg) -> usize {
-    std::env::var("TNY_PER_SECTION").ok().and_then(|v| v.parse().ok()).unwrap_or(cfg.mode.dims().2)
+    std::env::var("TNY_PER_SECTION")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(cfg.mode.dims().2)
 }
 // F58: the answer is in the top-1 article for 36/58 cases and in the top-3 for 45/58.
 // F82: overridable, to measure what a cheap first pass over one article would reach.
 fn top_articles(cfg: &Cfg) -> usize {
-    std::env::var("TNY_TOP_ARTICLES").ok().and_then(|v| v.parse().ok()).unwrap_or(cfg.mode.dims().0)
+    std::env::var("TNY_TOP_ARTICLES")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(cfg.mode.dims().0)
 }
 // F63: hits per book. Deeper costs nothing — one request per book either way, just a longer
 // response — and it lifts the recall ceiling from 54/58 to 55/58 (`Hippocampus` answers
@@ -129,7 +145,10 @@ const PER_BOOK: usize = 8;
 /// any length tried, and 24 returned none. Overridable so a sweep costs a run rather than a
 /// rebuild — `TNY_SEARCH_TERMS=999` reproduces the unlimited query this replaced.
 fn search_terms() -> usize {
-    std::env::var("TNY_SEARCH_TERMS").ok().and_then(|v| v.parse().ok()).unwrap_or(8)
+    std::env::var("TNY_SEARCH_TERMS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(8)
 }
 
 const NEED_LLAMA: &str = "llama-server not on PATH. Install llama.cpp:\n  \
@@ -331,24 +350,25 @@ fn usage() {
     // A raw string, because `\n\` continuations swallow the leading whitespace of the next
     // line and every attempt to indent a sub-line inside one silently comes out flush left.
     eprint!(
-        r#"tny "question"          an answer from the ZIM corpora on this disk
+        r#"tny "question"          instant evidence from ZIM corpora on this disk
 tny                     the same, interactive
 
-speed        --ultrafast   the best passage from the page, no model      0.3 s
-             --fast        one article                                    14 s
-             --medium      three articles (default)                       39 s
-             --slow        three articles, read twice as deep             50 s
-             --molasses    three articles, as deep as it gets             90 s
+speed        --ultrafast   best verbatim passage, no model (default)     0.3 s
+             --fast        one article, grounded synthesis              14 s
+             --medium      three articles, grounded synthesis              39 s
+             --slow        three articles, read twice as deep            50 s
+             --molasses    three articles, as deep as it gets            90 s
 
 length       --low         one sentence
              --max         up to three paragraphs
 
 model        --model 0.8b  also 2b, 4b, or any huggingface repo:quant
+             applies to synthesis modes only
 
              what you pick in the interface is what you get next time
 
   -f, --follow    treat this as a follow-up to the last question
-      --fresh     re-answer instead of reusing the cached answer
+      --fresh     re-answer instead of reusing the cached result
   -v, --verbose   per-stage timings on stderr
 
 corpus       tny --corpus list             mounted ZIM files
@@ -357,15 +377,16 @@ corpus       tny --corpus list             mounted ZIM files
              tny --corpus add <name>       one ZIM (resumable, byte-verified)
              tny --corpus update           check for newer editions
 
-keys         i ask · 1-9 pick a source · ⏎ read it · j k scroll · r again
-             + - speed · < > length · :model 4b · q quit
+keys         i ask · 1-9 pick a source · ⏎ read it · j k scroll · r repeat
+             + then r generate · < > length · :model 4b · q quit
 
-needs llama-server and kiwix-serve on PATH
+needs kiwix-serve on PATH for evidence; llama-server for synthesis
 env: TNY_ZIM, TNY_MODELS, TNY_CHAT, TNY_KIWIX, TNY_MODE, TNY_LEN, TNY_MODEL
 "#
     );
 }
 
+#[allow(clippy::too_many_arguments)]
 fn config(
     verbose: bool,
     rank_only: bool,
@@ -387,7 +408,8 @@ fn config(
     // on external disk). ZIMs run to gigabytes and models to hundreds of megabytes, so they
     // live under XDG *data*, not config; `~/.cache/tny` keeps only what is regenerable.
     let cache = PathBuf::from(format!("{xdg_cache}/tny"));
-    std::fs::create_dir_all(&cache).map_err(|e| format!("cannot create {}: {e}", cache.display()))?;
+    std::fs::create_dir_all(&cache)
+        .map_err(|e| format!("cannot create {}: {e}", cache.display()))?;
     let (saved_mode, saved_len, saved_model) = load_prefs(&cache);
     Ok(Cfg {
         chat: std::env::var("TNY_CHAT").unwrap_or(format!("http://127.0.0.1:{CHAT_PORT}")),
@@ -405,7 +427,7 @@ fn config(
         mode: mode
             .or_else(|| std::env::var("TNY_MODE").ok().and_then(|v| Mode::parse(&v)))
             .or(saved_mode)
-            .unwrap_or(Mode::Medium),
+            .unwrap_or(Mode::Ultrafast),
         len: len
             .or_else(|| std::env::var("TNY_LEN").ok().and_then(|v| Len::parse(&v)))
             .or(saved_len)
@@ -419,7 +441,9 @@ fn config(
 }
 
 fn env_path(var: &str, fallback: String) -> PathBuf {
-    std::env::var(var).map(PathBuf::from).unwrap_or_else(|_| PathBuf::from(fallback))
+    std::env::var(var)
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| PathBuf::from(fallback))
 }
 
 // ------------------------------------------------------------------ corpus commands
@@ -429,7 +453,10 @@ fn corpus_cmd(cfg: &Cfg, args: &[String]) -> Result<i32, String> {
         "list" => {
             let local = corpus::local(&cfg.zim);
             if local.is_empty() {
-                eprintln!("tny: no ZIMs in {} — try: tny --corpus search bash", cfg.zim.display());
+                eprintln!(
+                    "tny: no ZIMs in {} — try: tny --corpus search bash",
+                    cfg.zim.display()
+                );
                 return Ok(3);
             }
             for stem in local {
@@ -452,7 +479,13 @@ fn corpus_cmd(cfg: &Cfg, args: &[String]) -> Result<i32, String> {
                 return Ok(3);
             }
             for e in hits {
-                println!("{:<34} {:>9}  {:>8} arts  {}", e.name, e.size_human(), e.articles, e.title);
+                println!(
+                    "{:<34} {:>9}  {:>8} arts  {}",
+                    e.name,
+                    e.size_human(),
+                    e.articles,
+                    e.title
+                );
             }
             Ok(0)
         }
@@ -495,13 +528,23 @@ fn corpus_cmd(cfg: &Cfg, args: &[String]) -> Result<i32, String> {
             let plan = corpus::pack_plan(&cfg.zim, &entries, &keys);
             let want = plan.want;
             if !plan.missing.is_empty() {
-                eprintln!("tny: not in the catalog, skipping: {}", plan.missing.join(", "));
+                eprintln!(
+                    "tny: not in the catalog, skipping: {}",
+                    plan.missing.join(", ")
+                );
             }
             if want.is_empty() {
-                println!("pack {name} is complete — all {} books are mounted", plan.present.len());
+                println!(
+                    "pack {name} is complete — all {} books are mounted",
+                    plan.present.len()
+                );
                 return Ok(0);
             }
-            println!("pack {name}: {} to download, {}", want.len(), human_bytes(plan.bytes));
+            println!(
+                "pack {name}: {} to download, {}",
+                want.len(),
+                human_bytes(plan.bytes)
+            );
             for (n, b) in &want {
                 println!("  {:<40} {:>9}", n, human_bytes(*b));
             }
@@ -527,7 +570,10 @@ fn corpus_cmd(cfg: &Cfg, args: &[String]) -> Result<i32, String> {
                 }
             }
             remount(cfg);
-            warn_unsearchable(cfg, &want.iter().map(|(n, _)| n.clone()).collect::<Vec<_>>());
+            warn_unsearchable(
+                cfg,
+                &want.iter().map(|(n, _)| n.clone()).collect::<Vec<_>>(),
+            );
             if failed > 0 {
                 eprintln!("\n{failed} of {} failed — re-run to resume", want.len());
             }
@@ -547,74 +593,10 @@ fn corpus_cmd(cfg: &Cfg, args: &[String]) -> Result<i32, String> {
             }
             Ok(0)
         }
-        other => Err(format!("unknown corpus command {other:?} — list, search, add, pack, update")),
+        other => Err(format!(
+            "unknown corpus command {other:?} — list, search, add, pack, update"
+        )),
     }
-}
-
-/// F88: `--corpus update` only ever warned, and only when the user thought to run it, so a
-/// library quietly ages until someone notices an answer citing a two-year-old page. The check
-/// comes to the user instead — after the answer, never before it, because nobody asked a
-/// question in order to be told about downloads.
-///
-/// Weekly at most, and declining snoozes it for another week: a prompt that appears every
-/// time is a prompt that gets answered without reading. Offline or catalog fetch failing is
-/// not an error here — it silently counts as "checked" so a laptop on a train stays quiet.
-const UPDATE_EVERY: u64 = 7 * 24 * 60 * 60;
-
-fn maybe_offer_update(cfg: &Cfg) {
-    let path = cfg.cache.join("update.json");
-    let state: serde_json::Value = std::fs::read_to_string(&path)
-        .ok()
-        .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or_else(|| serde_json::json!({}));
-    let now = now_secs();
-    if now.saturating_sub(state["checked"].as_u64().unwrap_or(0)) < UPDATE_EVERY {
-        return;
-    }
-    let mark = |asked: bool| {
-        let _ = std::fs::write(
-            &path,
-            serde_json::json!({ "checked": now, "asked": asked }).to_string(),
-        );
-    };
-    let Ok(entries) = corpus::fetch(&cfg.cache) else {
-        mark(false);
-        return;
-    };
-    let stale = corpus::outdated(&cfg.zim, &entries);
-    corpus::write_stale_note(&cfg.cache, &stale);
-    mark(!stale.is_empty());
-    if stale.is_empty() {
-        return;
-    }
-    let bytes: u64 = stale
-        .iter()
-        .filter_map(|(k, _, d)| entries.iter().find(|e| e.key() == *k && e.date() == *d))
-        .map(|e| e.bytes)
-        .sum();
-    eprintln!(
-        "\n\x1b[2m  {} newer edition{} available ({}): {}\x1b[0m",
-        stale.len(),
-        if stale.len() == 1 { "" } else { "s" },
-        human_bytes(bytes),
-        stale.iter().map(|(k, _, _)| k.as_str()).collect::<Vec<_>>().join(", ")
-    );
-    eprint!("  update now? [y/N] ");
-    std::io::stderr().flush().ok();
-    if !matches!(key(), Some(b'y') | Some(b'Y')) {
-        eprintln!("not now — asking again in a week");
-        return;
-    }
-    eprintln!("yes");
-    for (k, _, d) in &stale {
-        if let Some(e) = entries.iter().find(|e| e.key() == *k && e.date() == *d) {
-            if let Err(err) = corpus::add(&cfg.zim, &cfg.cache, &e.name) {
-                eprintln!("tny: {} failed — {err}", e.name);
-            }
-        }
-    }
-    corpus::write_stale_note(&cfg.cache, &[]);
-    remount(cfg);
 }
 
 fn human_bytes(b: u64) -> String {
@@ -628,12 +610,12 @@ fn human_bytes(b: u64) -> String {
 }
 
 // ------------------------------------------------------------------ the pipeline
-/// A question takes 20–60 s on a CPU, and silence for that long reads as a hang. The spinner
+/// Synthesis can take 20–60 s on a CPU, and silence for that long reads as a hang. The spinner
 /// is stderr-only and TTY-only, so pipes, the harness and `tny … > file` are untouched.
 ///
-/// Streaming the answer as it generates would be better and cannot be done: F27/F44/F45 reject
-/// ungrounded answers *after* reading them, and an answer that was printed cannot be
-/// unprinted. Progress is the honest substitute — it reports the stage, never the content.
+/// Streaming a synthesis answer would be better and cannot be done: F27/F44/F45 reject
+/// ungrounded answers *after* reading them, and an answer that was printed cannot be unprinted.
+/// Progress is the honest substitute — it reports the stage, never the content.
 struct Spin {
     tx: Option<std::sync::mpsc::Sender<Option<String>>>,
     join: Option<std::thread::JoinHandle<()>>,
@@ -644,12 +626,20 @@ impl Spin {
     /// Hosted: the label goes to the TUI's shared cell and no thread is spawned — the TUI
     /// already redraws on its own clock, so a second animator would just fight it.
     fn hosted(cell: &std::sync::Arc<std::sync::Mutex<String>>) -> Spin {
-        Spin { tx: None, join: None, cell: Some(cell.clone()) }
+        Spin {
+            tx: None,
+            join: None,
+            cell: Some(cell.clone()),
+        }
     }
 
     fn start(on: bool, first: &str) -> Spin {
         if !on {
-            return Spin { tx: None, join: None, cell: None };
+            return Spin {
+                tx: None,
+                join: None,
+                cell: None,
+            };
         }
         let (tx, rx) = std::sync::mpsc::channel::<Option<String>>();
         let mut label = first.to_string();
@@ -662,13 +652,21 @@ impl Spin {
                     Ok(None) | Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
                     Err(_) => {}
                 }
-                eprint!("\r\x1b[2K\x1b[2m{} {label}  {:.0}s\x1b[0m", FRAMES[i % 10], t0.elapsed().as_secs_f64());
+                eprint!(
+                    "\r\x1b[2K\x1b[2m{} {label}  {:.0}s\x1b[0m",
+                    FRAMES[i % 10],
+                    t0.elapsed().as_secs_f64()
+                );
                 let _ = std::io::stderr().flush();
             }
             eprint!("\r\x1b[2K");
             let _ = std::io::stderr().flush();
         });
-        Spin { tx: Some(tx), join: Some(join), cell: None }
+        Spin {
+            tx: Some(tx),
+            join: Some(join),
+            cell: None,
+        }
     }
 
     fn say(&self, label: impl Into<String>) {
@@ -701,7 +699,13 @@ fn human_book(name: &str) -> String {
         "wikipedia" => "Wikipedia".into(),
         "archlinux" => "Arch Wiki".into(),
         s if s.starts_with("devdocs") => {
-            let topic = name.split("_en_").nth(1).unwrap_or("").split('_').next().unwrap_or("");
+            let topic = name
+                .split("_en_")
+                .nth(1)
+                .unwrap_or("")
+                .split('_')
+                .next()
+                .unwrap_or("");
             format!("devdocs {topic}").trim().to_string()
         }
         s => s.trim_end_matches(".com").to_string(),
@@ -713,104 +717,24 @@ struct Answered {
     code: i32,
     text: String,
     sources: Vec<Source>,
-    /// Every candidate that survived ranking — a superset of `sources`, and what steering
-    /// picks from, because the right page is often one the answer was not built from.
+    /// Ranked search results shown in the TUI. This is a superset of `sources`: every entry
+    /// carries enough metadata for snippet preview, in-terminal reading, browser opening, and
+    /// optional selected-source synthesis.
     shortlist: Vec<Source>,
 }
 
-/// An article the answer was built from, kept so the prompt can open or re-use it.
+/// One ranked article exposed to the TUI and persisted with cached results.
 #[derive(Clone)]
 struct Source {
     book: String,
     path: String,
     title: String,
+    snip: String,
 }
 
-enum Next {
-    Ask(String, bool),
-    /// Re-ask the same question against one chosen result — the steer.
-    Use(usize),
-    Open(usize),
-    /// Print the whole shortlist, not just what was read.
-    More,
-    /// Re-ask the same question with more context — the "think harder" key.
-    Harder,
-    Again,
-    Quit,
-}
-
-/// F75: a terminal answerer that exits after one answer makes the user retype `tny` and pay
-/// the library and model start-up again for a question they already had in mind. The prompt
-/// keeps the process — and both servers — warm, and costs nothing when stdin is not a
-/// terminal, so pipes and the benchmark harness behave exactly as before.
+/// One-shot CLI path. Interactive terminals are owned by the TUI in `main`.
 fn run(cfg: &Cfg, question: &str, follow: bool) -> Result<i32, String> {
-    let mut q = question.to_string();
-    let mut follow = follow;
-    let mut focus: Option<Source> = None;
-    let mut cfg = Cfg { mode: cfg.mode, ..cfg.clone() };
-    loop {
-        let Answered { code, sources, shortlist, .. } = answer_once(&cfg, &q, follow, focus.as_ref())?;
-        focus = None;
-        let interactive = std::io::stdin().is_terminal()
-            && std::io::stderr().is_terminal()
-            && !cfg.rank_only
-            && !cfg.dump
-            && !cfg.context;
-        if !interactive {
-            return Ok(code);
-        }
-        // After the answer, and only here: a check that delays an answer is a check that
-        // gets disabled.
-        maybe_offer_update(&cfg);
-        if shortlist.is_empty() && sources.is_empty() {
-            return Ok(code);
-        }
-        // Steering works off the shortlist, which is a superset of what was read: the answer
-        // may have come from the wrong three, and the right page is often the fourth.
-        let list = if shortlist.is_empty() { sources.clone() } else { shortlist };
-        let mut showing_all = false;
-        loop {
-            match prompt(&list, sources.len(), showing_all, cfg.mode)? {
-                Next::Quit => return Ok(code),
-                Next::Again => continue,
-                Next::More => {
-                    showing_all = true;
-                    for (i, s) in list.iter().enumerate() {
-                        let mark = if i < sources.len() { "·" } else { " " };
-                        eprintln!("\x1b[2m {mark}{} {} · {}\x1b[0m", i + 1, human_book(&s.book), s.title);
-                    }
-                }
-                Next::Open(i) => open_source(&cfg, &list, i),
-                // The steer: same question, that source, no retrieval.
-                Next::Use(i) => match list.get(i) {
-                    Some(s) => {
-                        eprintln!("\x1b[2m  using {}\x1b[0m", s.title);
-                        focus = Some(s.clone());
-                        break;
-                    }
-                    None => continue,
-                },
-                // F94: the same question, read more deeply. Cheaper to press than to retype,
-                // and it is the honest response to "that answer looks thin".
-                Next::Harder => match cfg.mode.next() {
-                    Some(m) => {
-                        cfg.mode = m;
-                        eprintln!("\x1b[2m  reading more — {} mode\x1b[0m", m.name());
-                        break;
-                    }
-                    None => {
-                        eprintln!("\x1b[2m  already at molasses\x1b[0m");
-                        continue;
-                    }
-                },
-                Next::Ask(text, f) => {
-                    q = text;
-                    follow = f;
-                    break;
-                }
-            }
-        }
-    }
+    Ok(answer_once(cfg, question, follow, None)?.code)
 }
 
 /// One keypress, not a line: `q` must quit on the key, not on the key plus Enter. `stty` is
@@ -820,7 +744,11 @@ fn run(cfg: &Cfg, question: &str, follow: bool) -> Result<i32, String> {
 /// Ctrl-C arrives as a byte we handle, and the terminal is always restored by the line below.
 fn key() -> Option<u8> {
     let tty = |args: &[&str]| {
-        Command::new("stty").args(args).stdin(Stdio::inherit()).output().ok()
+        Command::new("stty")
+            .args(args)
+            .stdin(Stdio::inherit())
+            .output()
+            .ok()
     };
     let saved = tty(&["-g"])?;
     let saved = String::from_utf8_lossy(&saved.stdout).trim().to_string();
@@ -831,107 +759,31 @@ fn key() -> Option<u8> {
     (n == 1).then_some(b[0])
 }
 
-fn prompt(list: &[Source], read: usize, showing_all: bool, mode: Mode) -> Result<Next, String> {
-    // The digits are the steer, not the browser: pointing tny at the right page is the thing
-    // a user needs most when the first answer missed, so it costs one keypress. Opening a
-    // page in a browser is the rarer want, so it costs two (`o` then the digit).
-    let hint = if showing_all || list.len() <= read {
-        format!("1-{} use that source", list.len())
-    } else {
-        format!("1-{read} use that source · s see all {} matches", list.len())
-    };
-    let harder = if mode.next().is_some() { " · + read more" } else { "" };
-    eprint!("\x1b[2m  ▸ ask a follow-up · {hint}{harder} · o open · n new · q quit\x1b[0m\n> ");
-    std::io::stderr().flush().ok();
-    // No stty means no single-key mode; one answer and out beats a broken terminal.
-    let Some(k) = key() else { return Ok(Next::Quit) };
-    Ok(match k {
-        b'q' | 3 | 4 | 27 => {
-            eprintln!();
-            Next::Quit
-        }
-        // Re-ask the same question against one chosen result.
-        b'1'..=b'9' => {
-            eprintln!();
-            Next::Use((k - b'1') as usize)
-        }
-        b's' => {
-            eprintln!();
-            Next::More
-        }
-        b'+' => {
-            eprintln!();
-            Next::Harder
-        }
-        // `o` then a digit: open in the browser. kiwix already serves the corpora over HTTP,
-        // so this works with no network.
-        b'o' => {
-            eprint!("open which? ");
-            std::io::stderr().flush().ok();
-            match key() {
-                Some(d @ b'1'..=b'9') => {
-                    eprintln!();
-                    Next::Open((d - b'1') as usize)
-                }
-                _ => {
-                    eprintln!();
-                    Next::Open(0)
-                }
-            }
-        }
-        b'\r' | b'\n' => Next::Again,
-        // F29: a follow-up carries the previous turn into the retrieval query; `n` drops it,
-        // for when the subject changes and the old question would only poison the search.
-        b'n' => {
-            eprint!("\x1b[2m new topic\x1b[0m\n> ");
-            std::io::stderr().flush().ok();
-            match line()? {
-                Some(q) => Next::Ask(q, false),
-                None => Next::Quit,
-            }
-        }
-        // Any other key is the first character of a question. Raw mode ate it, so echo it and
-        // read the rest cooked - Backspace and the shell's line editing then work as usual.
-        c if c.is_ascii_graphic() || c == b' ' => {
-            eprint!("{}", c as char);
-            std::io::stderr().flush().ok();
-            match line()? {
-                Some(rest) => Next::Ask(format!("{}{rest}", c as char), true),
-                None => Next::Quit,
-            }
-        }
-        _ => Next::Again,
-    })
-}
-
-/// The rest of a typed line. `None` is EOF, which is a quit rather than an error.
-fn line() -> Result<Option<String>, String> {
-    let mut s = String::new();
-    if std::io::stdin().read_line(&mut s).map_err(|e| e.to_string())? == 0 {
-        eprintln!();
-        return Ok(None);
-    }
-    let s = s.trim().to_string();
-    Ok(if s.is_empty() { None } else { Some(s) })
-}
-
 /// The corpora are already served over HTTP by kiwix-serve, so "open the source" is a URL the
 /// browser can read — offline, from the same ZIM the answer came from.
 fn open_source(cfg: &Cfg, sources: &[Source], i: usize) {
     let Some(s) = sources.get(i) else { return };
     let url = format!("{}/content/{}/{}", cfg.kiwix, s.book, s.path);
-    let opener = if cfg!(target_os = "macos") { "open" } else { "xdg-open" };
-    match Command::new(opener).arg(&url).stdout(Stdio::null()).stderr(Stdio::null()).spawn() {
+    let opener = if cfg!(target_os = "macos") {
+        "open"
+    } else {
+        "xdg-open"
+    };
+    match Command::new(opener)
+        .arg(&url)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+    {
         Ok(_) => eprintln!("\x1b[2m  opening {}\x1b[0m", s.title),
         Err(_) => eprintln!("  {url}"),
     }
 }
 
 /// One question, one answer. Returns the exit code and the articles the answer was built
-/// from, so the prompt underneath can offer to open them.
-/// `focus` is the steer: when the user picks a result, retrieval is skipped and the answer is
-/// built from that one article. One turn should be enough — this is the safety net for when
-/// it is not, not an excuse for it not to be.
+/// from. `focus` is the steer: when the user picks a result, retrieval is skipped and the
+/// answer is built from that one article. One turn should be enough — this is the safety net
+/// for when it is not, not an excuse for it not to be.
 fn answer_once(
     cfg: &Cfg,
     question: &str,
@@ -942,11 +794,18 @@ fn answer_once(
     let quiet = cfg.rank_only || cfg.dump || cfg.context;
     let mut spin = match &cfg.progress {
         Some(cell) => Spin::hosted(cell),
-        None => Spin::start(std::io::stderr().is_terminal() && !quiet, "starting the library"),
+        None => Spin::start(
+            std::io::stderr().is_terminal() && !quiet,
+            "starting the library",
+        ),
     };
     serve_kiwix(cfg)?;
 
-    let prev = if follow { recent_turns(cfg, 2) } else { Vec::new() };
+    let prev = if follow {
+        recent_turns(cfg, 2)
+    } else {
+        Vec::new()
+    };
     // F85: a repeat costs a file read instead of 40 s. The key includes the turn being
     // followed, so the same words after a different question are a different question.
     let key = cache_key(cfg, question, prev.last());
@@ -955,10 +814,18 @@ fn answer_once(
             spin.stop();
             if !cfg.hosted() {
                 println!("{answer}");
-                eprintln!("\n\x1b[2m  {}   cached\x1b[0m", cite_lines(&sources).join("\n  "));
+                eprintln!(
+                    "\n\x1b[2m  {}   cached\x1b[0m",
+                    cite_lines(&sources).join("\n  ")
+                );
             }
             save_turn(cfg, question, &answer);
-            return Ok(Answered { code: 0, text: answer, sources, shortlist });
+            return Ok(Answered {
+                code: 0,
+                text: answer,
+                sources,
+                shortlist,
+            });
         }
     }
     // F29: the retrieval query is `<prev question> <this question>`. NEVER a model rewrite:
@@ -1046,15 +913,22 @@ fn answer_once(
             shortlist: vec![],
         });
     }
+    let expand_causal = focus.is_none()
+        && compare.is_none()
+        && question
+            .trim_start()
+            .to_ascii_lowercase()
+            .starts_with("why ")
+        && retrieve::infer_intent(question) == Intent::Other;
     // A comparison replaces the shortlist with one article per side, so the model is shown
     // both things it is being asked to compare rather than one and its own imagination.
-    let ranked = match focus {
+    let mut ranked = match focus {
         // Steered: one article, chosen by the user, and no ranking to argue with.
         Some(s) => vec![retrieve::Candidate {
             title: s.title.clone(),
             book: s.book.clone(),
             path: s.path.clone(),
-            snip: String::new(),
+            snip: s.snip.clone(),
             kind: retrieve::page_kind(&s.title, &s.path),
             rank: 0,
         }],
@@ -1068,6 +942,21 @@ fn answer_once(
             None => rank_articles(&retrieval_q, &cands),
         },
     };
+    // F117: causal wording supplies a second lexical view of a "why" question. Promote its
+    // winner only when the unexpanded search already put the same page in that corpus's top
+    // two. This fixes semantic near-misses without allowing expansion to invent a new topic.
+    if expand_causal {
+        if let Some(book) = ranked.first().map(|c| c.book.clone()) {
+            if let Ok(alternative) =
+                search_book(&cfg.kiwix, &format!("cause {query}"), &book, PER_BOOK)
+            {
+                if let Some(candidate) = consensus_candidate(&cands, &alternative) {
+                    ranked.retain(|c| c.book != candidate.book || c.path != candidate.path);
+                    ranked.insert(0, candidate);
+                }
+            }
+        }
+    }
     // Retrieval is 2 % of a query's wall time, so measuring ranking through full generation
     // costs 80 s per case and hides the thing under test. `--rank` stops here and prints the
     // whole shortlist, because rank-1 alone cannot distinguish a scoring miss from a
@@ -1076,7 +965,12 @@ fn answer_once(
         for c in ranked.iter().take(8) {
             println!("{}\t{}\t{}", c.book, c.title, c.path);
         }
-        return Ok(Answered { code: 0, text: String::new(), sources: vec![], shortlist: vec![] });
+        return Ok(Answered {
+            code: 0,
+            text: String::new(),
+            sources: vec![],
+            shortlist: vec![],
+        });
     }
     if cfg.dump {
         // Every candidate, unranked, as JSON: lets a scorer be tried offline in
@@ -1091,15 +985,19 @@ fn answer_once(
             })
             .collect();
         println!("{}", serde_json::to_string(&rows).unwrap_or_default());
-        return Ok(Answered { code: 0, text: String::new(), sources: vec![], shortlist: vec![] });
+        return Ok(Answered {
+            code: 0,
+            text: String::new(),
+            sources: vec![],
+            shortlist: vec![],
+        });
     }
-    // Only now is the model needed: everything above is retrieval. `--context` stops before
-    // the load, so inspecting what the model was given costs a search and a fetch.
+    // Synthesis is loaded only after retrieval. `--context` stops before the load, so inspecting
+    // the model input costs a search and a fetch.
     if !cfg.context && cfg.mode.generates() {
         spin.say("loading the model");
         serve_chat(cfg)?;
     }
-
 
     // F58: three articles, not one. Rank-1 carries the answer for 36 of 58 verified cases,
     // but the top *three* carry it for 45 — retrieval's misses are near-misses, and a
@@ -1110,11 +1008,24 @@ fn answer_once(
     spin.say(format!("reading {}", ranked[0].title));
     let t = Instant::now();
     let mut docs: Vec<(&retrieve::Candidate, String)> = Vec::new();
-    // The eight results the user can steer with, not just the three that were read.
-    let shortlist: Vec<Source> = ranked
+    // Once rank 1 identifies a corpus, cross-corpus body-only coincidences are hidden from the
+    // visible shortlist. They remain ranked and available to generation; titles that name a
+    // query term remain visible for steering. This keeps recall without showing Rust examples
+    // containing "the sky is blue" beside an astronomy answer.
+    let top_book = &ranked[0].book;
+    let mut shortlist: Vec<Source> = ranked
         .iter()
+        .enumerate()
+        .filter(|(i, c)| {
+            *i == 0 || &c.book == top_book || title_matches_query(&retrieval_q, &c.title)
+        })
         .take(8)
-        .map(|c| Source { book: c.book.clone(), path: c.path.clone(), title: c.title.clone() })
+        .map(|(_, c)| Source {
+            book: c.book.clone(),
+            path: c.path.clone(),
+            title: c.title.clone(),
+            snip: denoise(&c.snip),
+        })
         .collect();
 
     // F91: one book can win every slot — "how do I change the hostname" put six man pages
@@ -1128,6 +1039,17 @@ fn answer_once(
             Ok(html) => docs.push((c, html)),
             Err(e) if docs.is_empty() => return Err(e),
             Err(_) => {}
+        }
+    }
+    // Search snippets can be navigation or metadata (Wikipedia's "Love" result was its
+    // related-topic list). Replace snippets for articles already fetched with passages from
+    // their actual text; selecting another result lazily does the same in the TUI.
+    for (candidate, html) in &docs {
+        if let Some(source) = shortlist
+            .iter_mut()
+            .find(|source| source.book == candidate.book && source.path == candidate.path)
+        {
+            source.snip = retrieve::best_passage(&prose_text(html), question);
         }
     }
     let t_fetch = t.elapsed();
@@ -1156,22 +1078,43 @@ fn answer_once(
             parts.push(format!("## {}\n{}", c.title, p.text));
             heads.extend(p.heads);
         }
-        retrieve::Picked { heads, text: parts.join("\n\n") }
+        retrieve::Picked {
+            heads,
+            text: parts.join("\n\n"),
+        }
     };
     let budget = (top_articles(cfg), top_sections(cfg));
     if cfg.context {
         println!("{}", pick(budget.0, budget.1).text);
-        return Ok(Answered { code: 0, text: String::new(), sources: vec![], shortlist: vec![] });
+        return Ok(Answered {
+            code: 0,
+            text: String::new(),
+            sources: vec![],
+            shortlist: vec![],
+        });
     }
 
-    // F32: grounding reads the whole article, not the slice sent to the model — the slice
-    // rejected a correct answer for citing `cryptsetup` from a neighbouring section. With
-    // three sources the reference is the union of all three, or a correct answer taken from
-    // the second article would be rejected as ungrounded.
-    let full = docs.iter().map(|(_, h)| html2txt(h)).collect::<Vec<_>>().join("\n");
-    let vocab = docs.iter().flat_map(|(_, h)| command_vocab(h)).collect::<Vec<_>>();
+    // Grounding scans are generation-only. Verbatim ultrafast output cannot invent facts, so
+    // avoid converting every fetched article and extracting its command vocabulary.
+    let (full, vocab) = if cfg.mode.generates() {
+        (
+            docs.iter()
+                .map(|(_, h)| html2txt(h))
+                .collect::<Vec<_>>()
+                .join("\n"),
+            docs.iter()
+                .flat_map(|(_, h)| command_vocab(h))
+                .collect::<Vec<_>>(),
+        )
+    } else {
+        (String::new(), Vec::new())
+    };
 
-    spin.say(if cfg.mode.generates() { "answering" } else { "reading" });
+    spin.say(if cfg.mode.generates() {
+        "answering"
+    } else {
+        "reading"
+    });
     let t = Instant::now();
     // F82: one article and two sections carry the fact for 40 of 58 cases at ~310 prefill
     // tokens, against 46/58 at ~913 — 69 % of questions answered for a third of the wall
@@ -1184,7 +1127,10 @@ fn answer_once(
     } else {
         vec![budget]
     };
-    let mut picked = retrieve::Picked { heads: Vec::new(), text: String::new() };
+    let mut picked = retrieve::Picked {
+        heads: Vec::new(),
+        text: String::new(),
+    };
     let mut answer = String::new();
     let mut why = String::new();
     for (arts, secs) in &rungs {
@@ -1213,12 +1159,7 @@ fn answer_once(
         } else {
             String::new()
         };
-        // F111: the deterministic rules ran and found nothing, so only now is the judge worth a
-        // call. It runs on every rung deliberately: on an early rung its "no" escalates, which
-        // costs context rather than the answer, and only the last rung's "no" is a refusal.
-        // Gating it on the last rung made it dead code — the ladder breaks at rung 1 whenever
-        // the deterministic rules pass, which is most questions.
-        if why.is_empty() && judged_offtopic(cfg, question, &answer) {
+        if cfg.mode.generates() && why.is_empty() && judged_offtopic(cfg, question, &answer) {
             why = "answer is not about the question's subject".into();
         }
         if why.is_empty() {
@@ -1238,6 +1179,7 @@ fn answer_once(
             book: c.book.clone(),
             path: c.path.clone(),
             title: c.title.clone(),
+            snip: denoise(&c.snip),
         })
         .collect();
 
@@ -1269,7 +1211,12 @@ fn answer_once(
         // one moment a download suggestion is certainly not noise.
         suggest_corpus(cfg, &query);
         println!("not found");
-        return Ok(Answered { code: 3, text: String::from("not found"), sources, shortlist });
+        return Ok(Answered {
+            code: 3,
+            text: String::from("not found"),
+            sources,
+            shortlist,
+        });
     }
     if !cfg.hosted() {
         println!("{}", answer.trim());
@@ -1279,7 +1226,7 @@ fn answer_once(
     // article that was not where the answer came from, and six section names that mean
     // something only to whoever wrote the ranker. What a reader needs is which works were
     // consulted; sections are diagnostics and moved behind `-v`.
-    // Numbered, because the prompt underneath opens them by number.
+    // Numbered source lines remain useful in the TUI shortlist.
     if !cfg.hosted() {
         eprintln!(
             "\n\x1b[2m  {}   {:.1}s\x1b[0m",
@@ -1289,7 +1236,12 @@ fn answer_once(
     }
     save_turn(cfg, question, &answer);
     cache_put(cfg, &key, answer.trim(), &sources, &shortlist);
-    Ok(Answered { code: 0, text: answer.trim().to_string(), sources, shortlist })
+    Ok(Answered {
+        code: 0,
+        text: answer.trim().to_string(),
+        sources,
+        shortlist,
+    })
 }
 
 fn cite_lines(sources: &[Source]) -> Vec<String> {
@@ -1329,7 +1281,11 @@ fn supporting<'a>(
     if best <= 0.0 {
         return docs.iter().collect();
     }
-    scored.into_iter().filter(|(s, _)| *s >= best * 0.8).map(|(_, d)| d).collect()
+    scored
+        .into_iter()
+        .filter(|(s, _)| *s >= best * 0.8)
+        .map(|(_, d)| d)
+        .collect()
 }
 
 /// F40/F57: the catalog is the index — 1,286 English ZIMs, cached locally at 1.5 MB, so a
@@ -1348,7 +1304,12 @@ fn suggest_corpus(cfg: &Cfg, query: &str) {
             if !hits.is_empty() {
                 eprintln!("     the library has:");
                 for e in hits {
-                    eprintln!("       {:<30} {:>9}  tny --corpus add {}", e.title, e.size_human(), e.name);
+                    eprintln!(
+                        "       {:<30} {:>9}  tny --corpus add {}",
+                        e.title,
+                        e.size_human(),
+                        e.name
+                    );
                 }
             }
         }
@@ -1358,13 +1319,23 @@ fn suggest_corpus(cfg: &Cfg, query: &str) {
 
 fn no_local_match(cfg: &Cfg, query: &str) -> i32 {
     println!("not found");
-    eprintln!("tny: no local corpus matched {query:?} ({} mounted)", corpus::local(&cfg.zim).len());
+    eprintln!(
+        "tny: no local corpus matched {query:?} ({} mounted)",
+        corpus::local(&cfg.zim).len()
+    );
     suggest_corpus(cfg, query);
     3
 }
 
-fn ask(cfg: &Cfg, question: &str, reference: &str, prev: &[(String, String)]) -> Result<String, String> {
-    let mut messages = vec![serde_json::json!({ "role": "system", "content": format!("{SYS}{}", cfg.len.clause()) })];
+fn ask(
+    cfg: &Cfg,
+    question: &str,
+    reference: &str,
+    prev: &[(String, String)],
+) -> Result<String, String> {
+    let mut messages = vec![
+        serde_json::json!({ "role": "system", "content": format!("{SYS}{}", cfg.len.clause()) }),
+    ];
     // F28: keep the prior turns in the message list. History carries the antecedent for
     // elliptical follow-ups ("how do I unlock *it* at boot") — 83 % vs 75 % stateless — and
     // it is cheaper than it looks, because turn 1's prefix is still in the KV cache.
@@ -1399,7 +1370,8 @@ fn ask(cfg: &Cfg, question: &str, reference: &str, prev: &[(String, String)]) ->
         .map_err(|e| format!("chat request failed: {e}"))?
         .into_string()
         .map_err(|e| format!("chat body: {e}"))?;
-    let j: serde_json::Value = serde_json::from_str(&resp).map_err(|e| format!("chat json: {e}"))?;
+    let j: serde_json::Value =
+        serde_json::from_str(&resp).map_err(|e| format!("chat json: {e}"))?;
     let msg = &j["choices"][0]["message"];
     let content = msg["content"].as_str().unwrap_or("");
     // F19: empty content with reasoning present is an ERROR, not an answer.
@@ -1443,9 +1415,16 @@ fn judged_offtopic(cfg: &Cfg, question: &str, answer: &str) -> bool {
     else {
         return false; // a judge that cannot be reached must not reject anything
     };
-    let Ok(text) = resp.into_string() else { return false };
-    let Ok(j) = serde_json::from_str::<serde_json::Value>(&text) else { return false };
-    let verdict = j["choices"][0]["message"]["content"].as_str().unwrap_or("").to_lowercase();
+    let Ok(text) = resp.into_string() else {
+        return false;
+    };
+    let Ok(j) = serde_json::from_str::<serde_json::Value>(&text) else {
+        return false;
+    };
+    let verdict = j["choices"][0]["message"]["content"]
+        .as_str()
+        .unwrap_or("")
+        .to_lowercase();
     // Only an explicit "no" rejects. An empty or unparseable verdict is not evidence, and F16's
     // failure mode was a model answering constantly — silence must cost nothing.
     verdict.trim_start().starts_with("no")
@@ -1488,7 +1467,10 @@ fn serve_kiwix(cfg: &Cfg) -> Result<(), String> {
             .filter(|p| p.extension().is_some_and(|x| x == "zim"))
             .collect();
         if zims.is_empty() {
-            return Err(format!("no ZIM files in {} — try: tny --corpus search bash", cfg.zim.display()));
+            return Err(format!(
+                "no ZIM files in {} — try: tny --corpus search bash",
+                cfg.zim.display()
+            ));
         }
         if !on_path("kiwix-serve") {
             return Err(NEED_KIWIX.into());
@@ -1522,7 +1504,9 @@ fn serving(cfg: &Cfg) -> Option<String> {
 /// GGUF's stem, which is the only part the two representations share.
 fn model_id(s: &str) -> String {
     let tail = s.rsplit('/').next().unwrap_or(s);
-    tail.trim_end_matches(".gguf").replace("-GGUF:", "-").to_string()
+    tail.trim_end_matches(".gguf")
+        .replace("-GGUF:", "-")
+        .to_string()
 }
 
 /// Kill the chat server we started, so the next question can start a different model.
@@ -1550,11 +1534,15 @@ fn stop_chat(cfg: &Cfg) {
 /// `available_parallelism` and let `TNY_THREADS` be the answer.
 fn physical_cores() -> usize {
     let fallback = || std::thread::available_parallelism().map_or(4, |n| n.get());
-    let Ok(txt) = std::fs::read_to_string("/proc/cpuinfo") else { return fallback() };
+    let Ok(txt) = std::fs::read_to_string("/proc/cpuinfo") else {
+        return fallback();
+    };
     let mut cores: Vec<(String, String)> = Vec::new();
     let (mut pkg, mut core) = (String::new(), String::new());
     for line in txt.lines() {
-        let Some((k, v)) = line.split_once(':') else { continue };
+        let Some((k, v)) = line.split_once(':') else {
+            continue;
+        };
         match k.trim() {
             "physical id" => pkg = v.trim().to_string(),
             "core id" => core = v.trim().to_string(),
@@ -1567,7 +1555,11 @@ fn physical_cores() -> usize {
             }
         }
     }
-    if cores.is_empty() { fallback() } else { cores.len() }
+    if cores.is_empty() {
+        fallback()
+    } else {
+        cores.len()
+    }
 }
 
 fn serve_chat(cfg: &Cfg) -> Result<(), String> {
@@ -1575,7 +1567,11 @@ fn serve_chat(cfg: &Cfg) -> Result<(), String> {
         return Ok(());
     }
     let model = cfg.model.as_str();
-    let size = MODELS.iter().find(|(_, r, _)| *r == model).map(|(_, _, s)| *s).unwrap_or("");
+    let size = MODELS
+        .iter()
+        .find(|(_, r, _)| *r == model)
+        .map(|(_, _, s)| *s)
+        .unwrap_or("");
     // F101: a mode switch can mean a different model, and one llama-server serves one model.
     // Restarting is honest — 1.5 s for the 0.8B — and two servers would not fit in RAM on the
     // machines this is for.
@@ -1586,23 +1582,44 @@ fn serve_chat(cfg: &Cfg) -> Result<(), String> {
         if !on_path("llama-server") {
             return Err(NEED_LLAMA.into());
         }
-        std::fs::create_dir_all(&cfg.models).map_err(|e| format!("cannot create {}: {e}", cfg.models.display()))?;
+        std::fs::create_dir_all(&cfg.models)
+            .map_err(|e| format!("cannot create {}: {e}", cfg.models.display()))?;
         // llama.cpp fetches `-hf` models into LLAMA_CACHE itself; say so, because a silent
         // 800 MB first run looks like a hang.
         // llama.cpp names its cache dir after the repo; close enough to know whether this
         // model has ever been fetched, and a wrong guess only costs a printed line.
-        let dir = format!("models--{}", model.split(':').next().unwrap_or(model).replace('/', "--"));
+        let dir = format!(
+            "models--{}",
+            model.split(':').next().unwrap_or(model).replace('/', "--")
+        );
         if !cfg.models.join(dir).is_dir() {
-            eprintln!("tny: downloading {model} {size}, once, into {}", cfg.models.display());
+            eprintln!(
+                "tny: downloading {model} {size}, once, into {}",
+                cfg.models.display()
+            );
         }
         let threads = std::env::var("TNY_THREADS")
             .ok()
             .and_then(|v| v.parse().ok())
             .unwrap_or_else(physical_cores);
         let mut cmd = Command::new("llama-server");
-        cmd.args(["-hf", model, "--no-mmproj", "--jinja", "--host", "127.0.0.1"])
-            .args(["-t", &threads.to_string(), "-c", "8192", "--port", &CHAT_PORT.to_string()])
-            .env("LLAMA_CACHE", &cfg.models);
+        cmd.args([
+            "-hf",
+            model,
+            "--no-mmproj",
+            "--jinja",
+            "--host",
+            "127.0.0.1",
+        ])
+        .args([
+            "-t",
+            &threads.to_string(),
+            "-c",
+            "8192",
+            "--port",
+            &CHAT_PORT.to_string(),
+        ])
+        .env("LLAMA_CACHE", &cfg.models);
         spawn(cmd, cfg, "chat")?;
         wait_up(&format!("{}/health", cfg.chat), 1800, "llama-server")?;
     }
@@ -1611,11 +1628,17 @@ fn serve_chat(cfg: &Cfg) -> Result<(), String> {
 
 fn spawn(mut cmd: Command, cfg: &Cfg, what: &str) -> Result<(), String> {
     let log = cfg.cache.join(format!("{what}.log"));
-    let out = std::fs::File::create(&log).map_err(|e| format!("cannot write {}: {e}", log.display()))?;
+    let out =
+        std::fs::File::create(&log).map_err(|e| format!("cannot write {}: {e}", log.display()))?;
     let err = out.try_clone().map_err(|e| format!("log dup: {e}"))?;
     cmd.stdin(Stdio::null()).stdout(out).stderr(err);
-    let child = cmd.spawn().map_err(|e| format!("cannot start {what}: {e}"))?;
-    let _ = std::fs::write(cfg.cache.join(format!("{what}.pid")), child.id().to_string());
+    let child = cmd
+        .spawn()
+        .map_err(|e| format!("cannot start {what}: {e}"))?;
+    let _ = std::fs::write(
+        cfg.cache.join(format!("{what}.pid")),
+        child.id().to_string(),
+    );
     Ok(())
 }
 
@@ -1644,17 +1667,24 @@ fn remount(cfg: &Cfg) {
         // Our port, our server: a kiwix-serve on KIWIX_PORT owned by this user is one that
         // tny started, now or in an earlier session, and leaving it up hides the new book.
         let _ = Command::new("pkill")
-            .args(["-u", &whoami(), "-f", &format!("kiwix-serve --port {KIWIX_PORT}")])
+            .args([
+                "-u",
+                &whoami(),
+                "-f",
+                &format!("kiwix-serve --port {KIWIX_PORT}"),
+            ])
             .status();
         std::thread::sleep(Duration::from_millis(300));
     }
-    eprintln!("tny: something else is holding {} — new books stay invisible until it stops", cfg.kiwix);
+    eprintln!(
+        "tny: something else is holding {} — new books stay invisible until it stops",
+        cfg.kiwix
+    );
 }
 
 fn whoami() -> String {
     std::env::var("USER").unwrap_or_else(|_| "0".into())
 }
-
 
 /// F89: the catalog's `_ftindex` tag cannot be trusted — it reads `no` for books that search
 /// perfectly — so the only honest test of "will this book ever answer anything" is to ask it
@@ -1667,14 +1697,17 @@ fn warn_unsearchable(cfg: &Cfg, names: &[String]) {
     }
     let dead: Vec<&String> = names
         .iter()
-        .filter(|n| retrieve::search_book(&cfg.kiwix, "the file", n, 1).map_or(false, |r| r.is_empty()))
+        .filter(|n| retrieve::search_book(&cfg.kiwix, "the file", n, 1).is_ok_and(|r| r.is_empty()))
         .collect();
     if dead.is_empty() {
         return;
     }
     eprintln!(
         "tny: no full-text index, so these will never be searched: {}",
-        dead.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", ")
+        dead.iter()
+            .map(|s| s.as_str())
+            .collect::<Vec<_>>()
+            .join(", ")
     );
 }
 
@@ -1710,7 +1743,9 @@ fn wait_up(url: &str, secs: u64, what: &str) -> Result<(), String> {
         }
         std::thread::sleep(Duration::from_millis(400));
     }
-    Err(format!("{what} did not come up within {secs}s — see the log in the tny cache dir"))
+    Err(format!(
+        "{what} did not come up within {secs}s — see the log in the tny cache dir"
+    ))
 }
 
 /// F84: the conversation is more than one turn deep. `last.json` kept exactly one exchange,
@@ -1731,9 +1766,14 @@ fn recent_turns(cfg: &Cfg, n: usize) -> Vec<(String, String)> {
 fn save_turn(cfg: &Cfg, q: &str, a: &str) {
     let mut turns = recent_turns(cfg, 4);
     turns.push((q.to_string(), a.to_string()));
-    let j: Vec<serde_json::Value> =
-        turns.iter().map(|(q, a)| serde_json::json!({ "q": q, "a": a })).collect();
-    let _ = std::fs::write(cfg.cache.join("turns.json"), serde_json::Value::Array(j).to_string());
+    let j: Vec<serde_json::Value> = turns
+        .iter()
+        .map(|(q, a)| serde_json::json!({ "q": q, "a": a }))
+        .collect();
+    let _ = std::fs::write(
+        cfg.cache.join("turns.json"),
+        serde_json::Value::Array(j).to_string(),
+    );
 }
 
 /// F85: asking the same question twice cost 40 s twice. The corpora are static files and the
@@ -1749,7 +1789,9 @@ fn prefs_path(cfg: &Cfg) -> PathBuf {
 }
 
 fn load_prefs(cache: &std::path::Path) -> (Option<Mode>, Option<Len>, Option<String>) {
-    let Ok(raw) = std::fs::read_to_string(cache.join("prefs")) else { return (None, None, None) };
+    let Ok(raw) = std::fs::read_to_string(cache.join("prefs")) else {
+        return (None, None, None);
+    };
     let mut it = raw.split_whitespace();
     (
         it.next().and_then(Mode::parse),
@@ -1810,13 +1852,11 @@ fn now_secs() -> u64 {
 /// Thirty days — and not the main invalidation. Corpora carry their edition date in the
 /// filename (`wikipedia_en_top_nopic_2026-06`), so a refresh lands as a *new* file and changes
 /// the book list in the key; `--corpus update` only ever warns, it never replaces anything
-/// behind the user's back. The TTL covers what the key cannot see: a file swapped by hand
-/// under the same name, and unbounded growth in a cache nobody prunes.
+/// behind the user's back. The TTL covers what the key cannot see: a file swapped by hand.
 const CACHE_TTL: u64 = 30 * 24 * 60 * 60;
 
-/// F99: the shortlist is cached with the answer. Steering is the repair for a bad answer,
-/// and the second time you ask something is exactly when you know it was bad — a cache hit
-/// that dropped the other candidates left you with nothing to steer to but a retype.
+/// F99: ranked results are cached with extracted/generated text. Search-first navigation must
+/// survive a repeated query instead of collapsing to only the articles already read.
 fn cached(cfg: &Cfg, key: &str) -> Option<(String, Vec<Source>, Vec<Source>)> {
     let raw = std::fs::read_to_string(cfg.cache.join("answers.json")).ok()?;
     let j: serde_json::Value = serde_json::from_str(&raw).ok()?;
@@ -1833,6 +1873,7 @@ fn cached(cfg: &Cfg, key: &str) -> Option<(String, Vec<Source>, Vec<Source>)> {
                             book: s["book"].as_str()?.to_string(),
                             path: s["path"].as_str()?.to_string(),
                             title: s["title"].as_str()?.to_string(),
+                            snip: s["snip"].as_str().unwrap_or_default().to_string(),
                         })
                     })
                     .collect()
@@ -1840,12 +1881,17 @@ fn cached(cfg: &Cfg, key: &str) -> Option<(String, Vec<Source>, Vec<Source>)> {
             .unwrap_or_default()
     };
     let sources = read(&hit["s"]);
-    // Entries written before the shortlist was cached fall back to what they do have.
     let shortlist = match read(&hit["l"]) {
         l if l.is_empty() => sources.clone(),
         l => l,
     };
-    Some((hit["a"].as_str()?.to_string(), sources, shortlist))
+    // Old cache entries predate search-result snippets; refresh them rather than presenting
+    // an empty search-first UI.
+    (!shortlist.iter().any(|s| s.snip.is_empty())).then_some((
+        hit["a"].as_str()?.to_string(),
+        sources,
+        shortlist,
+    ))
 }
 
 fn cache_put(cfg: &Cfg, key: &str, answer: &str, sources: &[Source], shortlist: &[Source]) {
@@ -1876,10 +1922,10 @@ fn cache_put(cfg: &Cfg, key: &str, answer: &str, sources: &[Source], shortlist: 
             "a": answer,
             "at": now,
             "s": sources.iter().map(|s| serde_json::json!({
-                "book": s.book, "path": s.path, "title": s.title
+                "book": s.book, "path": s.path, "title": s.title, "snip": s.snip
             })).collect::<Vec<_>>(),
             "l": shortlist.iter().map(|s| serde_json::json!({
-                "book": s.book, "path": s.path, "title": s.title
+                "book": s.book, "path": s.path, "title": s.title, "snip": s.snip
             })).collect::<Vec<_>>(),
         }),
     );

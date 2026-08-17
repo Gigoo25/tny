@@ -74,7 +74,10 @@ impl Entry {
     /// comparison keys on this instead.
     pub fn key(&self) -> String {
         let stem = self.stem();
-        DATED.captures(&stem).and_then(|c| c.get(1)).map_or(stem.clone(), |m| m.as_str().to_string())
+        DATED
+            .captures(&stem)
+            .and_then(|c| c.get(1))
+            .map_or(stem.clone(), |m| m.as_str().to_string())
     }
     pub fn size_human(&self) -> String {
         let mb = self.bytes as f64 / 1e6;
@@ -87,16 +90,24 @@ impl Entry {
 }
 
 fn unescape(s: &str) -> String {
-    s.replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", "\"").replace("&apos;", "'")
+    s.replace("&amp;", "&")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&apos;", "'")
 }
 
 pub fn parse(xml: &str) -> Vec<Entry> {
     let mut out = Vec::new();
     for item in xml.split("<entry>").skip(1) {
         let grab = |re: &Regex| -> String {
-            re.captures(item).and_then(|c| c.get(1)).map_or(String::new(), |m| unescape(m.as_str().trim()))
+            re.captures(item)
+                .and_then(|c| c.get(1))
+                .map_or(String::new(), |m| unescape(m.as_str().trim()))
         };
-        let Some(zim) = E_ZIM.captures(item) else { continue };
+        let Some(zim) = E_ZIM.captures(item) else {
+            continue;
+        };
         let name = grab(&E_NAME);
         if name.is_empty() {
             continue;
@@ -185,7 +196,9 @@ pub fn suggest<'a>(entries: &'a [Entry], query: &str, want: usize) -> Vec<&'a En
     scored.sort_by(|a, b| {
         let da = IS_DOCS.is_match(&format!("{} {}", a.0.name, a.0.tags));
         let db = IS_DOCS.is_match(&format!("{} {}", b.0.name, b.0.tags));
-        db.cmp(&da).then(b.1.cmp(&a.1)).then(a.0.bytes.cmp(&b.0.bytes))
+        db.cmp(&da)
+            .then(b.1.cmp(&a.1))
+            .then(a.0.bytes.cmp(&b.0.bytes))
     });
     scored.into_iter().take(want).map(|(e, _)| e).collect()
 }
@@ -213,7 +226,9 @@ pub fn local(zim: &Path) -> Vec<String> {
 pub fn outdated(zim: &Path, entries: &[Entry]) -> Vec<(String, String, String)> {
     let mut out = Vec::new();
     for stem in local(zim) {
-        let Some(c) = DATED.captures(&stem) else { continue };
+        let Some(c) = DATED.captures(&stem) else {
+            continue;
+        };
         let (key, have) = (c[1].to_string(), c[2].to_string());
         // several editions of the same book may be listed; take the newest matching one
         let newest = entries
@@ -239,12 +254,24 @@ pub fn write_stale_note(cache: &Path, stale: &[(String, String, String)]) {
         let _ = std::fs::remove_file(p);
         return;
     }
-    let names: Vec<String> = stale.iter().map(|(n, have, new)| format!("{n} {have}→{new}")).collect();
-    let _ = std::fs::write(p, format!("tny: {} corpus update(s): {}\n     refresh with: tny --corpus add <name>\n", stale.len(), names.join(", ")));
+    let names: Vec<String> = stale
+        .iter()
+        .map(|(n, have, new)| format!("{n} {have}→{new}"))
+        .collect();
+    let _ = std::fs::write(
+        p,
+        format!(
+            "tny: {} corpus update(s): {}\n     refresh with: tny --corpus add <name>\n",
+            stale.len(),
+            names.join(", ")
+        ),
+    );
 }
 
 pub fn stale_note(cache: &Path) -> Option<String> {
-    std::fs::read_to_string(cache.join("stale.txt")).ok().filter(|s| !s.trim().is_empty())
+    std::fs::read_to_string(cache.join("stale.txt"))
+        .ok()
+        .filter(|s| !s.trim().is_empty())
 }
 
 /// Several editions share one `<name>`. tny reads text and throws images away in
@@ -314,7 +341,10 @@ fn remote_len(urls: &[String]) -> Option<u64> {
         .build();
     for u in urls {
         if let Ok(r) = agent.head(u).set("User-Agent", "tny/0.1").call() {
-            if let Some(len) = r.header("content-length").and_then(|s| s.parse::<u64>().ok()) {
+            if let Some(len) = r
+                .header("content-length")
+                .and_then(|s| s.parse::<u64>().ok())
+            {
                 if len > 0 {
                     return Some(len);
                 }
@@ -347,9 +377,12 @@ fn pull(dest: &Path, url: &str, want: u64) -> Result<u64, String> {
         // If we already hold that many bytes the file is complete, which is exactly what
         // happened when the catalog's KiB-rounded length said otherwise.
         Err(ureq::Error::Status(416, r)) => {
-            let total = r
-                .header("content-range")
-                .and_then(|h| h.rsplit('/').next().map(str::trim).and_then(|n| n.parse::<u64>().ok()));
+            let total = r.header("content-range").and_then(|h| {
+                h.rsplit('/')
+                    .next()
+                    .map(str::trim)
+                    .and_then(|n| n.parse::<u64>().ok())
+            });
             return match total {
                 Some(t) if have >= t => Ok(have),
                 Some(t) => Err(format!("range {have} rejected, server holds {t} bytes")),
@@ -360,10 +393,16 @@ fn pull(dest: &Path, url: &str, want: u64) -> Result<u64, String> {
     };
     let resuming = resp.status() == 206;
     if have > 0 && !resuming {
-        return Err(format!("mirror ignored Range (status {}), refusing to restart", resp.status()));
+        return Err(format!(
+            "mirror ignored Range (status {}), refusing to restart",
+            resp.status()
+        ));
     }
     let mut file = if resuming {
-        std::fs::OpenOptions::new().append(true).open(dest).map_err(|e| format!("cannot append: {e}"))?
+        std::fs::OpenOptions::new()
+            .append(true)
+            .open(dest)
+            .map_err(|e| format!("cannot append: {e}"))?
     } else {
         std::fs::File::create(dest).map_err(|e| format!("cannot create {}: {e}", dest.display()))?
     };
@@ -381,11 +420,16 @@ fn pull(dest: &Path, url: &str, want: u64) -> Result<u64, String> {
                 return Err(format!("stalled at {:.0} MB: {e}", written as f64 / 1e6));
             }
         };
-        file.write_all(&buf[..n]).map_err(|e| format!("write failed: {e}"))?;
+        file.write_all(&buf[..n])
+            .map_err(|e| format!("write failed: {e}"))?;
         written += n as u64;
         if written - tick >= 32 << 20 {
             tick = written;
-            eprint!("\r     {:.0}/{:.0} MB", written as f64 / 1e6, want as f64 / 1e6);
+            eprint!(
+                "\r     {:.0}/{:.0} MB",
+                written as f64 / 1e6,
+                want as f64 / 1e6
+            );
             let _ = std::io::stderr().flush();
         }
     }
@@ -408,7 +452,9 @@ pub fn add(zim: &Path, cache: &Path, name: &str) -> Result<PathBuf, String> {
         .iter()
         .find(|e| e.stem() == name || e.key() == name)
         .or_else(|| pick_flavour(&entries, name))
-        .ok_or_else(|| format!("no catalog entry named {name} — try: tny --corpus search {name}"))?;
+        .ok_or_else(|| {
+            format!("no catalog entry named {name} — try: tny --corpus search {name}")
+        })?;
 
     std::fs::create_dir_all(zim).map_err(|e| format!("cannot create {}: {e}", zim.display()))?;
     let dest = zim.join(format!("{}.zim", entry.stem()));
@@ -434,11 +480,20 @@ pub fn add(zim: &Path, cache: &Path, name: &str) -> Result<PathBuf, String> {
     // and a short one is moved out of the way rather than deleted: those bytes still count.
     if disk(&dest) > 0 {
         if disk(&dest) == target {
-            eprintln!("tny: {} already complete ({})", dest.display(), entry.size_human());
+            eprintln!(
+                "tny: {} already complete ({})",
+                dest.display(),
+                entry.size_human()
+            );
             return Ok(dest);
         }
-        eprintln!("tny: {} is short — resuming it as {}", dest.display(), part.display());
-        std::fs::rename(&dest, &part).map_err(|e| format!("cannot move {}: {e}", dest.display()))?;
+        eprintln!(
+            "tny: {} is short — resuming it as {}",
+            dest.display(),
+            part.display()
+        );
+        std::fs::rename(&dest, &part)
+            .map_err(|e| format!("cannot move {}: {e}", dest.display()))?;
     }
     let have = disk(&part);
     if have > target {
@@ -448,9 +503,19 @@ pub fn add(zim: &Path, cache: &Path, name: &str) -> Result<PathBuf, String> {
         ));
     }
     if have > 0 {
-        eprintln!("tny: resuming {} at {:.0} MB of {}", entry.stem(), have as f64 / 1e6, entry.size_human());
+        eprintln!(
+            "tny: resuming {} at {:.0} MB of {}",
+            entry.stem(),
+            have as f64 / 1e6,
+            entry.size_human()
+        );
     } else {
-        eprintln!("tny: downloading {} ({}, {} articles)", entry.stem(), entry.size_human(), entry.articles);
+        eprintln!(
+            "tny: downloading {} ({}, {} articles)",
+            entry.stem(),
+            entry.size_human(),
+            entry.articles
+        );
     }
 
     let mut last = String::from("no mirror attempted");
@@ -464,8 +529,13 @@ pub fn add(zim: &Path, cache: &Path, name: &str) -> Result<PathBuf, String> {
                 Ok(n) if n >= target => {
                     eprintln!("\r     {:.0} MB from {host}", n as f64 / 1e6);
                     // Only a complete file gets the name kiwix-serve will mount.
-                    std::fs::rename(&part, &dest)
-                        .map_err(|e| format!("cannot rename {} to {}: {e}", part.display(), dest.display()))?;
+                    std::fs::rename(&part, &dest).map_err(|e| {
+                        format!(
+                            "cannot rename {} to {}: {e}",
+                            part.display(),
+                            dest.display()
+                        )
+                    })?;
                     eprintln!("tny: {} ready", dest.display());
                     return Ok(dest);
                 }
@@ -481,9 +551,16 @@ pub fn add(zim: &Path, cache: &Path, name: &str) -> Result<PathBuf, String> {
         }
         let after = std::fs::metadata(&part).map(|m| m.len()).unwrap_or(0);
         if after == before {
-            return Err(format!("no mirror is serving {} — last error: {last}", entry.stem()));
+            return Err(format!(
+                "no mirror is serving {} — last error: {last}",
+                entry.stem()
+            ));
         }
-        eprintln!("tny: pass {} advanced to {:.0} MB, continuing", pass + 1, after as f64 / 1e6);
+        eprintln!(
+            "tny: pass {} advanced to {:.0} MB, continuing",
+            pass + 1,
+            after as f64 / 1e6
+        );
     }
     Err(format!(
         "{} still incomplete after 4 passes — re-run to resume. Last error: {last}",
@@ -568,15 +645,34 @@ pub fn pack(name: &str) -> Option<(Vec<&'static str>, &'static str)> {
     // of transcripts answers fewer questions than 28 MB of man pages.
     let huge = [
         large.clone(),
-        vec!["wikipedia_en_all_nopic", "stackoverflow.com_en_all", "wiktionary_en_all_nopic"],
+        vec![
+            "wikipedia_en_all_nopic",
+            "stackoverflow.com_en_all",
+            "wiktionary_en_all_nopic",
+        ],
     ]
     .concat();
     match name {
-        "mini" => Some((mini, "man pages and developer reference — commands and APIs")),
-        "small" => Some((small, "+ 73k man pages, distro wikis, a general-knowledge floor")),
-        "medium" => Some((medium, "+ encyclopedia coverage — what NOTES.md was measured on")),
-        "large" => Some((large, "+ Stack Exchange, repair guides, emergency medicine, textbooks")),
-        "huge" => Some((huge, "+ all of Wikipedia, all of Stack Overflow, all of Wiktionary")),
+        "mini" => Some((
+            mini,
+            "man pages and developer reference — commands and APIs",
+        )),
+        "small" => Some((
+            small,
+            "+ 73k man pages, distro wikis, a general-knowledge floor",
+        )),
+        "medium" => Some((
+            medium,
+            "+ encyclopedia coverage — what NOTES.md was measured on",
+        )),
+        "large" => Some((
+            large,
+            "+ Stack Exchange, repair guides, emergency medicine, textbooks",
+        )),
+        "huge" => Some((
+            huge,
+            "+ all of Wikipedia, all of Stack Overflow, all of Wiktionary",
+        )),
         _ => None,
     }
 }
@@ -597,13 +693,25 @@ pub struct Plan {
 
 pub fn pack_plan(zim: &Path, entries: &[Entry], keys: &[&str]) -> Plan {
     let have: Vec<String> = local(zim);
-    let mut p = Plan { want: Vec::new(), present: Vec::new(), missing: Vec::new(), bytes: 0 };
+    let mut p = Plan {
+        want: Vec::new(),
+        present: Vec::new(),
+        missing: Vec::new(),
+        bytes: 0,
+    };
     for key in keys {
-        if have.iter().any(|h| DATED.captures(h).map(|c| c[1].to_string()).as_deref() == Some(key)) {
+        if have
+            .iter()
+            .any(|h| DATED.captures(h).map(|c| c[1].to_string()).as_deref() == Some(key))
+        {
             p.present.push((*key).to_string());
             continue;
         }
-        match entries.iter().filter(|e| e.key() == *key).max_by_key(|e| e.date()) {
+        match entries
+            .iter()
+            .filter(|e| e.key() == *key)
+            .max_by_key(|e| e.date())
+        {
             Some(e) => {
                 p.bytes += e.bytes;
                 p.want.push((e.name.clone(), e.bytes));

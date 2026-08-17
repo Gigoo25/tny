@@ -22,6 +22,13 @@ re!(WS = r"\s+");
 re!(SCRIPT = r"(?s)<script.*?</script>");
 re!(STYLE = r"(?s)<style.*?</style>");
 re!(TAG = r"<[^>]+>");
+re!(PARAGRAPH = r"(?is)<p(?:\s[^>]*)?>(.*?)</p>");
+re!(TABLE = r"(?is)<table(?:\s[^>]*)?>.*?</table>");
+re!(HEADER = r"(?is)<header(?:\s[^>]*)?>.*?</header>");
+re!(NAV = r"(?is)<nav(?:\s[^>]*)?>.*?</nav>");
+re!(ASIDE = r"(?is)<aside(?:\s[^>]*)?>.*?</aside>");
+re!(FOOTER = r"(?is)<footer(?:\s[^>]*)?>.*?</footer>");
+re!(CONTENT_BLOCK = r"(?is)<(h[2-6]|p|li|pre)(?:\s[^>]*)?>(.*?)</(?:h[2-6]|p|li|pre)>");
 re!(ENT_NUM = r"&#([0-9]+);");
 re!(FENCE = r"(?s)```[A-Za-z0-9]*\s*(.*?)```");
 re!(INLINE = "`([^`\n]+)`");
@@ -43,13 +50,17 @@ re!(IDENT = r"[A-Za-z0-9_.]*(?:::|_|/)[A-Za-z0-9_./:-]+|\b[a-z]+[A-Z][A-Za-z0-9_
 re!(NOTFOUND = r"(?i)not found");
 re!(THINK = r"(?s)<think>.*?</think>");
 // F45: "how many" is not "how to"; "why did this fail" may legitimately be prose.
-re!(HOWTO = r"(?i)^(?:how (?:do|can|would) i|how to|what command)\b|^(?:create|set|mount|encrypt|generate|check|list|install|enable|configure|disable|remove|start|stop|make)\b");
+re!(
+    HOWTO = r"(?i)^(?:how (?:do|can|would) i|how to|what command)\b|^(?:create|set|mount|encrypt|generate|check|list|install|enable|configure|disable|remove|start|stop|make)\b"
+);
 // F112: "what is X" asks about X, and an answer that defines a *qualified* X answers a
 // different question. `a zombie cookie is a piece of data`, `a turtle shell is made up of`.
 re!(DEF_Q = r"(?i)^\s*(?:what|which)\s+(?:is|are|was|were)\b");
 re!(DEF_A = r"(?i)\b(?:a|an|the)\s+([a-z][a-z0-9 /_.-]{0,40}?)\s+(?:is|are|was|were)\s");
 // Words that qualify nothing: a subject of "the small piece" names no subject at all.
-re!(SUBJ_SKIP = r"(?i)^(?:small|large|main|basic|simple|single|whole|entire|piece|type|kind|form|part|set|term|word|name|thing|value|file|data|text|way|use|used|user|system|computer)$");
+re!(
+    SUBJ_SKIP = r"(?i)^(?:small|large|main|basic|simple|single|whole|entire|piece|type|kind|form|part|set|term|word|name|thing|value|file|data|text|way|use|used|user|system|computer)$"
+);
 
 fn is_wordish(c: char) -> bool {
     c.is_ascii_alphanumeric() || c == '_' || c == '-'
@@ -72,9 +83,9 @@ fn bounded(hay: &str, needle: &str, right: bool) -> bool {
         return false;
     }
     hay.match_indices(needle).any(|(at, m)| {
-        let left = hay[..at].chars().next_back().map_or(true, |c| !is_wordish(c));
+        let left = hay[..at].chars().next_back().is_none_or(|c| !is_wordish(c));
         let end = at + m.len();
-        let r = !right || hay[end..].chars().next().map_or(true, |c| !is_wordish(c));
+        let r = !right || hay[end..].chars().next().is_none_or(|c| !is_wordish(c));
         left && r
     })
 }
@@ -97,10 +108,63 @@ pub fn html2txt(h: &str) -> String {
         .replace("&apos;", "'")
         .replace("&nbsp;", " ");
     let s = ENT_NUM.replace_all(&s, |c: &regex::Captures| {
-        c[1].parse::<u32>().ok().and_then(char::from_u32).map(String::from).unwrap_or_default()
+        c[1].parse::<u32>()
+            .ok()
+            .and_then(char::from_u32)
+            .map(String::from)
+            .unwrap_or_default()
     });
     // last: &amp; must not resurrect an entity decoded above
     denoise(&s.replace("&amp;", "&"))
+}
+
+/// Read article prose without navigation tables, sidebars, or related-topic boxes. Search
+/// previews need the paragraphs users came for; full article reading still uses `html2txt`.
+pub fn prose_text(h: &str) -> String {
+    let paragraphs = PARAGRAPH
+        .captures_iter(h)
+        .map(|c| c.get(1).map_or("", |m| m.as_str()))
+        .collect::<Vec<_>>();
+    if paragraphs.is_empty() {
+        html2txt(h)
+    } else {
+        html2txt(&paragraphs.join(" "))
+    }
+}
+
+/// Render article structure for terminal reading. HTML block elements carry enough semantics:
+/// paragraphs become spaced paragraphs, headings get underlines, lists get bullets, and tables
+/// are omitted because Kiwix uses them for infoboxes and navigation rather than article prose.
+pub fn article_text(h: &str) -> String {
+    let h = TABLE.replace_all(h, " ");
+    let h = HEADER.replace_all(&h, " ");
+    let h = NAV.replace_all(&h, " ");
+    let h = ASIDE.replace_all(&h, " ");
+    let h = FOOTER.replace_all(&h, " ");
+    let mut blocks = Vec::new();
+    for capture in CONTENT_BLOCK.captures_iter(&h) {
+        let kind = capture
+            .get(1)
+            .map_or("", |m| m.as_str())
+            .to_ascii_lowercase();
+        let text = html2txt(capture.get(2).map_or("", |m| m.as_str()));
+        if text.is_empty() {
+            continue;
+        }
+        blocks.push(match kind.as_str() {
+            "li" => format!("• {text}"),
+            kind if kind.starts_with('h') => {
+                format!("{text}\n{}", "─".repeat(text.chars().count().min(72)))
+            }
+            "pre" => format!("    {text}"),
+            _ => text,
+        });
+    }
+    if blocks.is_empty() {
+        prose_text(&h)
+    } else {
+        blocks.join("\n\n")
+    }
 }
 
 fn first_token(s: &str) -> Option<&str> {
@@ -127,7 +191,9 @@ pub fn commands_in(text: &str) -> Vec<String> {
     for block in blocks {
         for line in block.split('\n') {
             let line = LEAD.replace(line.trim(), "");
-            let Some(first) = first_token(&line) else { continue };
+            let Some(first) = first_token(&line) else {
+                continue;
+            };
             if first.len() >= 2 && CMD_SHAPE.is_match(first) && !out.iter().any(|c| c == first) {
                 out.push(first.to_string());
             }
@@ -171,7 +237,10 @@ pub fn split_compare(q: &str) -> Option<(String, String)> {
         return None;
     }
     let cleaned = SCAFFOLD.replace(ql, "");
-    let parts: Vec<&str> = CMP_SPLIT.split(&cleaned).filter(|s| !s.trim().is_empty()).collect();
+    let parts: Vec<&str> = CMP_SPLIT
+        .split(&cleaned)
+        .filter(|s| !s.trim().is_empty())
+        .collect();
     if parts.len() < 2 {
         return None;
     }
@@ -185,7 +254,13 @@ pub fn split_compare(q: &str) -> Option<(String, String)> {
     } else {
         (right_full, String::new())
     };
-    let join = |s: &str| if tail.is_empty() { s.to_string() } else { format!("{s} {tail}") };
+    let join = |s: &str| {
+        if tail.is_empty() {
+            s.to_string()
+        } else {
+            format!("{s} {tail}")
+        }
+    };
     Some((join(left), join(right)))
 }
 
@@ -221,7 +296,10 @@ pub fn ungrounded(answer: &str, reference: &str, q: &str, seen: &str) -> String 
             .filter(|s| !word_start_in(&seen_l, &s.to_lowercase()))
             .collect();
         if !unsupported.is_empty() {
-            return format!("asserts about {}, absent from what was shown", unsupported.join(", "));
+            return format!(
+                "asserts about {}, absent from what was shown",
+                unsupported.join(", ")
+            );
         }
     }
     if !absent.is_empty() {
@@ -231,7 +309,12 @@ pub fn ungrounded(answer: &str, reference: &str, q: &str, seen: &str) -> String 
         // Narrow on purpose: a word-overlap ratio caught one real echo and produced two
         // false rejects, and a false reject is worse — it turns a correct answer into
         // "not found".
-        let norm = |s: &str| NONALNUM.replace_all(&s.to_lowercase(), " ").trim().to_string();
+        let norm = |s: &str| {
+            NONALNUM
+                .replace_all(&s.to_lowercase(), " ")
+                .trim()
+                .to_string()
+        };
         if norm(q).contains(&norm(a)) {
             return "restates the question".into();
         }
@@ -276,7 +359,11 @@ pub fn ungrounded_detail(answer: &str, reference: &str) -> String {
     // fragment "-contained" and false-rejected a correct answer. No lookbehind in `regex`,
     // so the boundary is checked on the character before the match.
     for m in FLAG.find_iter(&a) {
-        if a[..m.start()].chars().next_back().map_or(true, |c| !is_wordish(c)) {
+        if a[..m.start()]
+            .chars()
+            .next_back()
+            .is_none_or(|c| !is_wordish(c))
+        {
             ids.push(m.as_str().to_string());
         }
     }
@@ -331,7 +418,6 @@ fn strip_think(s: &str) -> String {
     THINK.replace_all(s, "").to_string()
 }
 
-
 /// F112: the wrong-page family no reference comparison can see. "what is a cookie made of"
 /// answered from `Zombie cookie` is *grounded* — every identifier in it is in its reference —
 /// and the question's terms are all present in the article's title, so no lexical check fires
@@ -347,7 +433,9 @@ pub fn ungrounded_subject(answer: &str, q: &str) -> String {
         return String::new();
     }
     let ql = q.to_lowercase();
-    let Some(c) = DEF_A.captures(a) else { return String::new() };
+    let Some(c) = DEF_A.captures(a) else {
+        return String::new();
+    };
     let subject = c.get(1).map_or("", |m| m.as_str()).to_lowercase();
     // Every content word of the subject has to be a word the question used. One that is not is
     // the qualifier that changed the question: corn/zombie/turtle.
@@ -368,18 +456,38 @@ mod subject {
     #[test]
     fn rejects_a_qualified_subject() {
         // F112's two cases, verbatim from bench/.answers-f111.json.
-        assert!(!sub("A zombie cookie is a piece of data created by a web server.", "what is a cookie made of").is_empty());
-        assert!(!sub("The turtle shell is made up of bony elements.", "what is a shell in biology").is_empty());
+        assert!(!sub(
+            "A zombie cookie is a piece of data created by a web server.",
+            "what is a cookie made of"
+        )
+        .is_empty());
+        assert!(!sub(
+            "The turtle shell is made up of bony elements.",
+            "what is a shell in biology"
+        )
+        .is_empty());
     }
 
     #[test]
     fn accepts_the_subject_asked_about() {
-        assert!(sub("A kernel is a critical component of an operating system.", "what is a kernel in an operating system").is_empty());
-        assert!(sub("An HTTP cookie is a small piece of data.", "what is an http cookie used for").is_empty());
+        assert!(sub(
+            "A kernel is a critical component of an operating system.",
+            "what is a kernel in an operating system"
+        )
+        .is_empty());
+        assert!(sub(
+            "An HTTP cookie is a small piece of data.",
+            "what is an http cookie used for"
+        )
+        .is_empty());
         // Definitional questions only: the album answer is article@1's problem, not this rule's.
         assert!(sub("Sky Blue Sky is an album by Wilco.", "why is the sky blue").is_empty());
         // No definitional clause at all.
-        assert!(sub("Virtual memory allows a computer to extend its main memory.", "what is virtual memory").is_empty());
+        assert!(sub(
+            "Virtual memory allows a computer to extend its main memory.",
+            "what is virtual memory"
+        )
+        .is_empty());
     }
 }
 #[cfg(test)]
@@ -397,18 +505,73 @@ mod tests {
         let du = "Use `du -h` to see what is using disk space, or `ncdu`.";
 
         // must catch
-        assert!(!ungrounded("Use `mkfs.ext4 /dev/sdb1`.", swap, "create a swap file", swap).is_empty());
-        assert_eq!(ungrounded("create a swap file", swap, "create a swap file", swap), "restates the question");
+        assert!(!ungrounded(
+            "Use `mkfs.ext4 /dev/sdb1`.",
+            swap,
+            "create a swap file",
+            swap
+        )
+        .is_empty());
+        assert_eq!(
+            ungrounded("create a swap file", swap, "create a swap file", swap),
+            "restates the question"
+        );
         assert_eq!(ungrounded("", swap, "create a swap file", swap), "empty");
-        assert_eq!(ungrounded("Which filesystem do you want?", swap, "create a swap file", swap), "asks a question back");
+        assert_eq!(
+            ungrounded(
+                "Which filesystem do you want?",
+                swap,
+                "create a swap file",
+                swap
+            ),
+            "asks a question back"
+        );
         // `du` must not be satisfied by "produce"
-        assert!(!ungrounded("Use `du -h`.", "This will produce output.", "check disk", "This will produce output.").is_empty());
+        assert!(!ungrounded(
+            "Use `du -h`.",
+            "This will produce output.",
+            "check disk",
+            "This will produce output."
+        )
+        .is_empty());
 
         // must allow
-        assert_eq!(ungrounded("Run `mkswap /swapfile` then `swapon /swapfile`.", swap, "create a swap file", swap), "");
-        assert_eq!(ungrounded("Use timedatectl set-timezone to set it.", tz, "set the system timezone", tz), "");
-        assert_eq!(ungrounded("# timedatectl set-timezone Europe/London", tz, "set the system timezone", tz), "");
-        assert_eq!(ungrounded("Use `du -h` for that.", du, "check what is using disk space", du), "");
+        assert_eq!(
+            ungrounded(
+                "Run `mkswap /swapfile` then `swapon /swapfile`.",
+                swap,
+                "create a swap file",
+                swap
+            ),
+            ""
+        );
+        assert_eq!(
+            ungrounded(
+                "Use timedatectl set-timezone to set it.",
+                tz,
+                "set the system timezone",
+                tz
+            ),
+            ""
+        );
+        assert_eq!(
+            ungrounded(
+                "# timedatectl set-timezone Europe/London",
+                tz,
+                "set the system timezone",
+                tz
+            ),
+            ""
+        );
+        assert_eq!(
+            ungrounded(
+                "Use `du -h` for that.",
+                du,
+                "check what is using disk space",
+                du
+            ),
+            ""
+        );
     }
 
     #[test]
@@ -418,7 +581,15 @@ mod tests {
         // answering only the retrieved side is fine
         assert_eq!(ungrounded("netctl is profile-based.", shown, q, shown), "");
         // both sides present in the reference is fine
-        assert_eq!(ungrounded("netctl is profile-based; NetworkManager is dynamic.", shown, q, shown), "");
+        assert_eq!(
+            ungrounded(
+                "netctl is profile-based; NetworkManager is dynamic.",
+                shown,
+                q,
+                shown
+            ),
+            ""
+        );
         // asserting about a side absent from what was shown is not
         let narrow = "netctl is profile-based.";
         assert!(!ungrounded("NetworkManager is better for laptops.", narrow, q, narrow).is_empty());
@@ -427,17 +598,34 @@ mod tests {
     #[test]
     fn f44_detail_rule() {
         let ver = "The current stable version is 1.97.1, released on 2026-08-12.";
-        assert!(ungrounded_detail("The current stable version is 4.0.0, released on 2026-07-16.", ver)
-            .starts_with("number not in reference"));
+        assert!(ungrounded_detail(
+            "The current stable version is 4.0.0, released on 2026-07-16.",
+            ver
+        )
+        .starts_with("number not in reference"));
         let enc = "Encrypt a partition using cryptsetup luksFormat /dev/sdX.";
-        assert!(ungrounded_detail("Encrypt with `cryptsetup --keyring /dev/mapper/x`.", enc)
-            .starts_with("identifier not in reference"));
+        assert!(
+            ungrounded_detail("Encrypt with `cryptsetup --keyring /dev/mapper/x`.", enc)
+                .starts_with("identifier not in reference")
+        );
         // hyphenated prose is not a flag: "self-contained" must not yield "-contained"
         let ssh = "ssh-keygen -t ed25519 creates a key pair.";
-        assert_eq!(ungrounded_detail("Use `ssh-keygen` with `-t ed25519` for a secure, self-contained key pair.", ssh), "");
+        assert_eq!(
+            ungrounded_detail(
+                "Use `ssh-keygen` with `-t ed25519` for a secure, self-contained key pair.",
+                ssh
+            ),
+            ""
+        );
         // real numbers pass
         let df = "/dev/mapper/root 220G 209G 1.2G 99% /";
-        assert_eq!(ungrounded_detail("The root filesystem is 99% full, with only 1.2G available.", df), "");
+        assert_eq!(
+            ungrounded_detail(
+                "The root filesystem is 99% full, with only 1.2G available.",
+                df
+            ),
+            ""
+        );
     }
 
     #[test]
@@ -451,16 +639,46 @@ mod tests {
         )
         .is_empty());
         // bare command counts: no backticks needed (350M writes prose)
-        assert_eq!(ungrounded_shape("Use timedatectl set-timezone to change it.", "how do I set the system timezone", &vocab), "");
+        assert_eq!(
+            ungrounded_shape(
+                "Use timedatectl set-timezone to change it.",
+                "how do I set the system timezone",
+                &vocab
+            ),
+            ""
+        );
         // vocabulary from links, not just <code>
-        let du_vocab: Vec<String> = ["du", "ncdu", "gdu", "dust"].iter().map(|s| s.to_string()).collect();
-        assert_eq!(ungrounded_shape("du alternatives include dust, gdu, and ncdu.", "check what is using disk space", &du_vocab), "");
+        let du_vocab: Vec<String> = ["du", "ncdu", "gdu", "dust"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        assert_eq!(
+            ungrounded_shape(
+                "du alternatives include dust, gdu, and ncdu.",
+                "check what is using disk space",
+                &du_vocab
+            ),
+            ""
+        );
         // refusal is exempt
-        assert_eq!(ungrounded_shape("not found", "how do I set the system timezone", &vocab), "");
+        assert_eq!(
+            ungrounded_shape("not found", "how do I set the system timezone", &vocab),
+            ""
+        );
         // "how many" is not "how to"
-        assert_eq!(ungrounded_shape("It has 302 neurons.", "how many neurons does C. elegans have", &vocab), "");
+        assert_eq!(
+            ungrounded_shape(
+                "It has 302 neurons.",
+                "how many neurons does C. elegans have",
+                &vocab
+            ),
+            ""
+        );
         // diagnosis may be prose
-        assert_eq!(ungrounded_shape("The disk is full.", "why did this fail", &vocab), "");
+        assert_eq!(
+            ungrounded_shape("The disk is full.", "why did this fail", &vocab),
+            ""
+        );
     }
 
     #[test]
@@ -470,6 +688,30 @@ mod tests {
         for want in ["rm", "mv", "ncdu", "gdu"] {
             assert!(v.iter().any(|c| c == want), "missing {want} in {v:?}");
         }
+    }
+
+    #[test]
+    fn prose_text_skips_sidebar_content() {
+        let html = "<table class=\"sidebar\"><tr><td>Types of love Affection Bonding \
+                    Lovesickness</td></tr></table><p><b>Love</b> is an emotion involving strong \
+                    attraction, affection, emotional attachment or concern.</p>";
+        assert_eq!(
+            prose_text(html),
+            "Love is an emotion involving strong attraction, affection, emotional attachment or concern."
+        );
+    }
+
+    #[test]
+    fn article_text_preserves_terminal_structure() {
+        let html = "<header><ol><li>Questions</li><li>Tags</li></ol></header>\
+                    <nav><ol><li>Home</li></ol></nav>\
+                    <table><tr><td><p>Sidebar noise</p></td></tr></table>\
+                    <h2>History</h2><p>First paragraph.</p>\
+                    <ul><li>One</li><li>Two</li></ul>";
+        assert_eq!(
+            article_text(html),
+            "History\n───────\n\nFirst paragraph.\n\n• One\n\n• Two"
+        );
     }
 
     #[test]

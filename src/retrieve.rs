@@ -19,7 +19,9 @@ macro_rules! re {
 // no document shares zeroes the whole query — "string versus str slice" returned 0 hits,
 // and dropping "versus" returns `str` first. Comparison words are the common culprit and
 // they carry no retrieval signal.
-re!(STOP = r"(?i)^(how|do|i|the|a|an|my|is|are|why|what|when|where|to|in|on|from|of|for|can|does|with|and|it|not|be|get|set|make|use|versus|vs|difference|differences|between|tradeoff|tradeoffs|pros|cons|better|worse|should|or|choose|choosing|compare|comparison|alternative|alternatives)$");
+re!(
+    STOP = r"(?i)^(how|do|i|the|a|an|my|is|are|why|what|when|where|to|in|on|from|of|for|can|does|with|and|it|not|be|get|set|make|create|use|versus|vs|difference|differences|between|tradeoff|tradeoffs|pros|cons|better|worse|should|or|choose|choosing|compare|comparison|alternative|alternatives)$"
+);
 re!(NONQUERY = r"[^A-Za-z0-9\s.:+#-]");
 // F93: a flag as the user writes it — `--oneline`, `-p`, `--no-pager`. Anchored to a word
 // boundary so `-p` does not match inside `--pretty`, and the capture is the flag itself.
@@ -27,7 +29,9 @@ re!(FLAG_Q = r"(?:^|\s)(--?[a-zA-Z][a-zA-Z0-9-]*)");
 // F31: deliberately NOT `STOP` — that list strips set/make/use/get, exactly the verbs a
 // section head uses ("Set system clock"). This strips follow-up filler instead. 14/14 was
 // measured with this list.
-re!(STOP_LEX = r"(?i)^(how|do|i|the|a|an|my|is|are|why|what|when|where|to|in|on|from|of|for|can|does|with|and|it|only|ones|one|again|instead|all)$");
+re!(
+    STOP_LEX = r"(?i)^(how|do|i|the|a|an|my|is|are|why|what|when|where|to|in|on|from|of|for|can|does|with|and|it|only|ones|one|again|instead|all)$"
+);
 re!(TERM = r"[a-z0-9-]{2,}");
 re!(HEADING = r"(?s)<h[2345][^>]*>(.*?)</h[2345]>");
 re!(TAG = r"<[^>]+>");
@@ -37,7 +41,9 @@ re!(ITEM_LINK = r"(?s)<link>(.*?)</link>");
 re!(ITEM_DESC = r"(?s)<description>(.*?)</description>");
 re!(CONTENT_BOOK = r"/content/([^/]+)");
 // F14: the English _maxi ZIM is full of localised duplicates — half the candidate list.
-re!(LOCALISED = r"\((Magyar|Deutsch|Español|Français|Português|Italiano|Polski|Русский|简体|正體|日本語|한국어|Türkçe|Nederlands|Čeština|Ελληνικά|עברית|فارسی|العربية|Indonesia|Tiếng Việt|Norsk|Dansk|Svenska|Suomi|Română|Български|Українська|Hrvatski|Slovenčina|Lietuvių|Català)\)");
+re!(
+    LOCALISED = r"\((Magyar|Deutsch|Español|Français|Português|Italiano|Polski|Русский|简体|正體|日本語|한국어|Türkçe|Nederlands|Čeština|Ελληνικά|עברית|فارسی|العربية|Indonesia|Tiếng Việt|Norsk|Dansk|Svenska|Suomi|Română|Български|Українська|Hrvatski|Slovenčina|Lietuvių|Català)\)"
+);
 
 // F48: page kind, from path structure and title shape — no model, no per-book config.
 // Mounting Stack Exchange put "Highest Voted 'pacman' Questions" at rank 1 for a how-to
@@ -52,17 +58,26 @@ re!(SE_INDEX = r"(?i)^(highest voted|newest|active|unanswered|top|recent)\b|\bqu
 // Stack Exchange ZIM: `questions/tagged/bash`, never nested.
 re!(NAV_PATH = r"^questions/tagged/|^users?/|^tags?/");
 re!(QA_PATH = r"questions/[0-9]+/");
-// F49: intent is INFERRED from the query — there is no label at runtime. Measured at 12/18.
-re!(DIAGNOSE = r"(?i)\b(error|errors|fail|failed|failing|refused|denied|cannot|can't|won't|does ?n't|broken|why (is|are|does|do|did|would|am|can't)|no such|not found|timed? ?out|exit code|permission)\b");
-re!(HOWTO_Q = r"(?i)^(how (do|can|would) i|how to|what command)\b|^(create|set|mount|encrypt|generate|check|list|install|enable|configure|disable|remove|start|stop|make)\b");
+// F49/F117: diagnosis needs an error signal. Bare "why is" is a causal knowledge question;
+// treating every such query as a failure promoted Q&A and dropped the article lead.
+re!(
+    DIAGNOSE = r"(?i)\b(error|errors|fail|failed|failing|refused|denied|cannot|can't|won't|does ?n't|broken|no such|not found|timed? ?out|exit code|permission)\b"
+);
+re!(
+    HOWTO_Q = r"(?i)^(how (do|can|would) i|how to|what command)\b|^(create|set|mount|encrypt|generate|check|list|install|enable|configure|disable|remove|start|stop|make)\b"
+);
 re!(TITLE_TERM = r"[a-z0-9_.:-]{2,}");
 re!(TITLE_STOP = r"^(the|a|an|of|in|to|and|or|for)$");
 // F68: prose glue that survives `prep` — it is not a stopword (it can be a section head or a
 // title term), but among twenty candidates it is the first thing to drop from a search query.
-re!(GLUE = r"^(am|is|are|was|were|be|been|being|have|has|had|do|does|did|will|would|can|could|should|may|might|must|my|me|it|its|this|that|these|those|there|here|then|than|but|so|if|when|while|from|into|onto|with|without|about|like|just|also|very|really|some|any|all|not|only|even|still|want|wanted|need|needed|try|tried|trying|get|got|getting|see|seen|know|think|seems|new|old|good|bad)$");
+re!(
+    GLUE = r"^(am|is|are|was|were|be|been|being|have|has|had|do|does|did|will|would|can|could|should|may|might|must|my|me|it|its|this|that|these|those|there|here|then|than|but|so|if|when|while|from|into|onto|with|without|about|like|just|also|very|really|some|any|all|not|only|even|still|want|wanted|need|needed|try|tried|trying|get|got|getting|see|seen|know|think|seems|new|old|good|bad)$"
+);
 // F64: apparatus, not content — citation and navigation sections that answer nothing but match
 // query terms densely because they are lists of titles.
-re!(APPARATUS = r"(?i)^\s*(references?|external links?|see also|further reading|bibliography|notes?|citations?|sources?|footnotes?|related pages?|external resources?)\s*$");
+re!(
+    APPARATUS = r"(?i)^\s*(references?|external links?|see also|further reading|bibliography|notes?|citations?|sources?|footnotes?|related pages?|external resources?)\s*$"
+);
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Kind {
@@ -122,11 +137,91 @@ pub struct Picked {
 pub fn prep(q: &str) -> String {
     let lower = q.to_lowercase();
     let cleaned = NONQUERY.replace_all(&lower, " ");
-    cleaned
-        .split_whitespace()
-        .filter(|w| !STOP.is_match(w))
+    let words: Vec<&str> = cleaned.split_whitespace().collect();
+    words
+        .iter()
+        .enumerate()
+        .filter(|(i, word)| {
+            !STOP.is_match(word)
+                && !(*i == 0
+                    && words.get(1).is_some_and(|next| question_helper(next))
+                    && mistyped_question_lead(word))
+        })
+        .map(|(_, word)| *word)
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+fn question_helper(word: &str) -> bool {
+    matches!(
+        word,
+        "am" | "are"
+            | "can"
+            | "did"
+            | "do"
+            | "does"
+            | "is"
+            | "should"
+            | "was"
+            | "were"
+            | "will"
+            | "would"
+    )
+}
+
+fn mistyped_question_lead(word: &str) -> bool {
+    word.len() <= 5
+        && ["how", "what", "when", "where", "which", "who", "why"]
+            .iter()
+            .any(|expected| one_edit_away(word, expected))
+}
+
+fn one_edit_away(word: &str, expected: &str) -> bool {
+    if word == expected || word.len().abs_diff(expected.len()) > 1 {
+        return false;
+    }
+    let (short, long) = if word.len() <= expected.len() {
+        (word.as_bytes(), expected.as_bytes())
+    } else {
+        (expected.as_bytes(), word.as_bytes())
+    };
+    if short.len() == long.len() {
+        let mut first = usize::MAX;
+        let mut second = usize::MAX;
+        let mut count = 0;
+        for (i, (a, b)) in short.iter().zip(long).enumerate() {
+            if a != b {
+                count += 1;
+                if count == 1 {
+                    first = i;
+                } else if count == 2 {
+                    second = i;
+                } else {
+                    return false;
+                }
+            }
+        }
+        return count == 1
+            || (count == 2
+                && second == first + 1
+                && short[first] == long[second]
+                && short[second] == long[first]);
+    }
+    let mut i = 0;
+    let mut j = 0;
+    let mut skipped = false;
+    while i < short.len() && j < long.len() {
+        if short[i] == long[j] {
+            i += 1;
+            j += 1;
+        } else if skipped {
+            return false;
+        } else {
+            skipped = true;
+            j += 1;
+        }
+    }
+    true
 }
 
 /// F68: kiwix returns *nothing* for a long query. Measured on one book: 4 terms → 13 hits,
@@ -209,7 +304,6 @@ pub fn lex_score(head: &str, body: &str, t: &[String]) -> usize {
     }
     s
 }
-
 
 /// F93: a flag question is answered by the flag's own entry, and by nothing else on the page.
 /// `--oneline` occurs three times in git-log(1): twice as a cross-reference ("such as
@@ -333,7 +427,11 @@ pub fn sections_of(html: &str) -> Vec<Section> {
             let whole = c.get(0).unwrap();
             let inner = c.get(1).map_or("", |m| m.as_str());
             let text = TAG.replace_all(inner, " ");
-            (WS.replace_all(&text, " ").trim().to_string(), whole.start(), whole.end())
+            (
+                WS.replace_all(&text, " ").trim().to_string(),
+                whole.start(),
+                whole.end(),
+            )
         })
         .collect();
     let mut out = Vec::new();
@@ -347,14 +445,20 @@ pub fn sections_of(html: &str) -> Vec<Section> {
     if let Some((_, first, _)) = heads.first() {
         let lead = html2txt(&html[..*first]);
         if lead.len() > 80 {
-            out.push(Section { head: "(lead)".into(), text: lead });
+            out.push(Section {
+                head: "(lead)".into(),
+                text: lead,
+            });
         }
     }
     for (i, (head, _, end)) in heads.iter().enumerate() {
         let stop = heads.get(i + 1).map_or(html.len(), |(_, at, _)| *at);
         let text = html2txt(&html[*end..stop]);
         if text.len() > 80 {
-            out.push(Section { head: head.clone(), text });
+            out.push(Section {
+                head: head.clone(),
+                text,
+            });
         }
     }
     out
@@ -399,7 +503,7 @@ pub fn pick_sections(html: &str, q: &str, top_n: usize, per: usize) -> Picked {
         .filter(|(_, s)| !APPARATUS.is_match(&s.head))
         .map(|(i, s)| (i, lex_score(&s.head, &s.text, &t)))
         .collect();
-    scored.sort_by(|a, b| b.1.cmp(&a.1));
+    scored.sort_by_key(|b| std::cmp::Reverse(b.1));
     // Wikipedia repeats `References` under several parents, so the same head can win more than
     // one slot and spend the budget twice on identical junk.
     let mut heads_seen: Vec<&str> = Vec::new();
@@ -431,7 +535,11 @@ pub fn pick_sections(html: &str, q: &str, top_n: usize, per: usize) -> Picked {
                     let open = per / 3;
                     let rest = window(&s.text, &t, per - open, q);
                     let opening = window(&s.text, &[], open, "");
-                    if rest.starts_with(opening.trim_end()) { window(&s.text, &t, per, q) } else { format!("{opening}\n…\n{rest}") }
+                    if rest.starts_with(opening.trim_end()) {
+                        window(&s.text, &t, per, q)
+                    } else {
+                        format!("{opening}\n…\n{rest}")
+                    }
                 } else {
                     window(&s.text, &t, per, q)
                 };
@@ -449,20 +557,22 @@ pub fn pick_sections(html: &str, q: &str, top_n: usize, per: usize) -> Picked {
 /// Stack Exchange question title beat the Arch Wiki's "Swap" on a how-to query purely by
 /// matching more terms. That single defect cost 14 of 32 cases.
 ///
-/// F59: the +3 that replaced it was still too heavy. A grid over the weights, scored offline
-/// against all 58 cases (bench/sweep.mjs), puts every one of the top 14 configurations at
-/// +2: article@1 36/58 against 32/58, and the answer reaches the top three for 47 cases
-/// against 43. The win is a plateau (title 2 x cover 3-4 x rank 4-5 all score alike), and it
-/// gains in all four fixtures, so it is not a fit to one of them.
+/// F59: +2 beat the original +3 across 58 cases. F116's frozen cross-domain set exposed the
+/// remaining literal-title bias: +1 improves frozen rank-1 from 24/40 to 25/40 with no worsened
+/// rank. Live regression improves article@1 35→36, shortlist 49→50, and answer@1 38→40 while
+/// answer@3 holds at 49; book@1 trades 47→46.
 fn title_body_score(c: &Candidate, t: &[String]) -> f64 {
     let title = c.title.to_lowercase();
     let tw = TERM.find_iter(&title).count().max(1) as f64;
     let title_hits = t.iter().filter(|w| title.contains(w.as_str())).count() as f64;
     let body = denoise(&c.snip).to_lowercase();
     let body_len = body.chars().count().min(400);
-    let body = &body[..body.char_indices().nth(body_len).map_or(body.len(), |(i, _)| i)];
+    let body = &body[..body
+        .char_indices()
+        .nth(body_len)
+        .map_or(body.len(), |(i, _)| i)];
     let body_hits = t.iter().filter(|w| body.contains(w.as_str())).count() as f64;
-    title_hits * 2.0 / tw.sqrt() + body_hits / (t.len().max(1) as f64)
+    title_hits / tw.sqrt() + body_hits / (t.len().max(1) as f64)
 }
 
 /// Is the title an entity the query names? Reference questions do exactly this — "what does
@@ -486,7 +596,11 @@ fn title_covered(c: &Candidate, t: &[String]) -> f64 {
     // confined to short words, where a substring is an accident rather than a stem: `ip` inside
     // `zip`, `go` inside `google`. Boundaries for those, substrings for the rest.
     let matched = |w: &&str| {
-        if w.len() < 4 { crate::ground::word_in(&joined, w) } else { joined.contains(*w) }
+        if w.len() < 4 {
+            crate::ground::word_in(&joined, w)
+        } else {
+            joined.contains(*w)
+        }
     };
     if !words.iter().all(matched) {
         return 0.0;
@@ -497,6 +611,15 @@ fn title_covered(c: &Candidate, t: &[String]) -> f64 {
     // `PostgreSQL`. Scale by the share of the question the title actually accounts for: a
     // title naming 2 of 4 query terms is twice the entity match of one naming 1 of 4.
     words.len() as f64 / t.len().max(1) as f64
+}
+
+/// Whether a title names any informative query term. Body-only matches from another corpus are
+/// useful for recall but make a poor visible shortlist once one corpus has supplied the winner.
+pub fn title_matches_query(q: &str, title: &str) -> bool {
+    let title = title.to_ascii_lowercase();
+    terms(q)
+        .iter()
+        .any(|term| crate::ground::word_in(&title, term))
 }
 
 /// A how-to question wants instructions, and a Q&A title that is itself a question is not
@@ -535,6 +658,17 @@ pub fn rank_articles(q: &str, cands: &[Candidate]) -> Vec<Candidate> {
     scored.into_iter().map(|(_, c)| c.clone()).collect()
 }
 
+/// Accept an alternate query's winner only when the original query independently placed the
+/// same page in its top two within that corpus. This is query consensus, not a topic rule: an
+/// expansion can promote a stable near-miss but cannot introduce an unrelated answer.
+pub fn consensus_candidate(original: &[Candidate], alternative: &[Candidate]) -> Option<Candidate> {
+    let candidate = alternative.first()?;
+    original
+        .iter()
+        .any(|c| c.book == candidate.book && c.path == candidate.path && c.rank <= 1)
+        .then(|| candidate.clone())
+}
+
 /// F91: reciprocal rank fusion, as the alternative to adding two signals with a hand-tuned
 /// weight. The lexical score and Xapian's own within-book order are two rankings of the same
 /// candidates; RRF merges them by *position* rather than magnitude, which is the standard fix
@@ -552,7 +686,12 @@ pub fn rank_articles_rrf(q: &str, cands: &[Candidate]) -> Vec<Candidate> {
     let mut lex: Vec<(f64, usize)> = cands
         .iter()
         .enumerate()
-        .map(|(i, c)| (title_body_score(c, &t) + kind_prior(intent, c.kind) + title_covered(c, &t) * 3.0, i))
+        .map(|(i, c)| {
+            (
+                title_body_score(c, &t) + kind_prior(intent, c.kind) + title_covered(c, &t) * 3.0,
+                i,
+            )
+        })
         .collect();
     lex.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
     let mut lex_rank = vec![0usize; cands.len()];
@@ -578,7 +717,9 @@ pub fn urlencode(s: &str) -> String {
     let mut out = String::with_capacity(s.len() + 8);
     for b in s.bytes() {
         match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => out.push(b as char),
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(b as char)
+            }
             _ => out.push_str(&format!("%{b:02X}")),
         }
     }
@@ -589,7 +730,9 @@ fn parse_items(xml: &str) -> Vec<Candidate> {
     let mut out = Vec::new();
     for item in xml.split("<item>").skip(1) {
         let grab = |re: &Regex| -> String {
-            re.captures(item).and_then(|c| c.get(1)).map_or(String::new(), |m| m.as_str().to_string())
+            re.captures(item)
+                .and_then(|c| c.get(1))
+                .map_or(String::new(), |m| m.as_str().to_string())
         };
         let title = grab(&ITEM_TITLE);
         let link = grab(&ITEM_LINK);
@@ -602,21 +745,40 @@ fn parse_items(xml: &str) -> Vec<Candidate> {
         }
         let path = link
             .rfind("/content/")
-            .and_then(|i| link[i + 9..].find('/').map(|j| link[i + 9 + j + 1..].to_string()))
+            .and_then(|i| {
+                link[i + 9..]
+                    .find('/')
+                    .map(|j| link[i + 9 + j + 1..].to_string())
+            })
             .unwrap_or_default();
         let kind = page_kind(&title, &path);
         if kind == Kind::Index {
             continue; // F48: navigation pages are never answers
         }
-        let snip = WS.replace_all(&TAG.replace_all(&grab(&ITEM_DESC), " "), " ").trim().to_string();
+        let snip = WS
+            .replace_all(&TAG.replace_all(&grab(&ITEM_DESC), " "), " ")
+            .trim()
+            .to_string();
         let rank = out.len();
-        out.push(Candidate { title, book, path, snip, kind, rank });
+        out.push(Candidate {
+            title,
+            book,
+            path,
+            snip,
+            kind,
+            rank,
+        });
     }
     out
 }
 
 /// One book. `books.name` wants the ZIM filename stem (F11).
-pub fn search_book(kiwix: &str, query: &str, book: &str, want: usize) -> Result<Vec<Candidate>, String> {
+pub fn search_book(
+    kiwix: &str,
+    query: &str,
+    book: &str,
+    want: usize,
+) -> Result<Vec<Candidate>, String> {
     let url = format!(
         "{kiwix}/search?books.name={book}&pattern={}&format=xml&pageLength={want}",
         urlencode(query)
@@ -640,13 +802,19 @@ pub fn search_union(kiwix: &str, query: &str, books: &[String], per_book: usize)
     // F78: the requests are independent and kiwix-serve is threaded, so they overlap. Four at
     // a time, not sixteen: kiwix-serve SIGSEGVs under heavier concurrency on a loaded machine
     // (F72), and a laptop answering one question is not the place to saturate a server.
-    let threads = books.len().min(4).max(1);
+    let threads = books.len().clamp(1, 4);
     let chunk = books.len().div_ceil(threads);
     let mut parts: Vec<Vec<Vec<Candidate>>> = Vec::with_capacity(threads);
     std::thread::scope(|s| {
         let handles: Vec<_> = books
             .chunks(chunk)
-            .map(|ch| s.spawn(move || ch.iter().map(|b| search_book(kiwix, query, b, per_book).unwrap_or_default()).collect::<Vec<_>>()))
+            .map(|ch| {
+                s.spawn(move || {
+                    ch.iter()
+                        .map(|b| search_book(kiwix, query, b, per_book).unwrap_or_default())
+                        .collect::<Vec<_>>()
+                })
+            })
             .collect();
         for h in handles {
             parts.push(h.join().unwrap_or_default());
@@ -703,10 +871,26 @@ mod tests {
         );
         let html = html.as_str();
         let p = pick_sections(html, "when did the berlin wall fall", 3, 600);
-        assert!(!p.heads.iter().any(|h| h == "References"), "apparatus section selected: {:?}", p.heads);
-        assert!(!p.heads.iter().any(|h| h == "See also"), "apparatus section selected: {:?}", p.heads);
-        assert!(p.heads.iter().any(|h| h == "Fall"), "lost the prose section: {:?}", p.heads);
-        assert!(p.text.contains("1989"), "the answer is not in the sent text: {}", p.text);
+        assert!(
+            !p.heads.iter().any(|h| h == "References"),
+            "apparatus section selected: {:?}",
+            p.heads
+        );
+        assert!(
+            !p.heads.iter().any(|h| h == "See also"),
+            "apparatus section selected: {:?}",
+            p.heads
+        );
+        assert!(
+            p.heads.iter().any(|h| h == "Fall"),
+            "lost the prose section: {:?}",
+            p.heads
+        );
+        assert!(
+            p.text.contains("1989"),
+            "the answer is not in the sent text: {}",
+            p.text
+        );
     }
 
     #[test]
@@ -719,24 +903,48 @@ mod tests {
                     <h2>Notes on swap</h2><p>A swap file must not be sparse, so create it with \
                     a tool that writes real blocks rather than reserving a hole.</p>";
         let p = pick_sections(html, "how do I create a swap file", 3, 600);
-        assert_eq!(p.heads.iter().filter(|h| *h == "Usage").count(), 1, "duplicate head: {:?}", p.heads);
+        assert_eq!(
+            p.heads.iter().filter(|h| *h == "Usage").count(),
+            1,
+            "duplicate head: {:?}",
+            p.heads
+        );
     }
 
     #[test]
     fn nav_filter_never_eats_command_pages() {
         // F61: `/tags?/` unanchored matched devdocs' command reference and deleted the very
         // page the question named. Both directions must hold, on real paths from the ZIMs.
-        assert_eq!(page_kind("docker tag", "engine/reference/commandline/tag/index"), Kind::Article);
+        assert_eq!(
+            page_kind("docker tag", "engine/reference/commandline/tag/index"),
+            Kind::Article
+        );
         assert_eq!(page_kind("git tag", "git-tag/index"), Kind::Article);
-        assert_eq!(page_kind("Highest Voted 'bash' Questions", "questions/tagged/bash"), Kind::Index);
-        assert_eq!(page_kind("Swap file management", "questions/659914/swap-file-management"), Kind::Qa);
+        assert_eq!(
+            page_kind("Highest Voted 'bash' Questions", "questions/tagged/bash"),
+            Kind::Index
+        );
+        assert_eq!(
+            page_kind(
+                "Swap file management",
+                "questions/659914/swap-file-management"
+            ),
+            Kind::Qa
+        );
     }
 
     #[test]
     fn prep_strips_comparison_words() {
         // F35: "string versus str slice" returned 0 hits because kiwix ANDs every term
-        assert_eq!(prep("what is the difference between string versus str slice"), "string str slice");
-        assert_eq!(prep("How do I create a swap file?"), "create swap file");
+        assert_eq!(
+            prep("what is the difference between string versus str slice"),
+            "string str slice"
+        );
+        assert_eq!(prep("How do I create a swap file?"), "swap file");
+        assert_eq!(
+            prep("Hopw do I create a function in Python?"),
+            "function python"
+        );
     }
 
     #[test]
@@ -754,7 +962,10 @@ mod tests {
         let filler = "a ".repeat(400);
         let text = format!("{filler}PermitRootLogin no is the setting.{filler}");
         let w = window(&text, &[String::from("permitrootlogin")], 200, "");
-        assert!(w.to_lowercase().contains("permitrootlogin"), "window missed the needle: {w}");
+        assert!(
+            w.to_lowercase().contains("permitrootlogin"),
+            "window missed the needle: {w}"
+        );
     }
 
     #[test]
@@ -795,6 +1006,51 @@ mod tests {
         assert_eq!(p.heads, vec!["(lead)".to_string()]);
         assert!(p.text.contains("mkswap"));
     }
+    #[test]
+    fn one_term_definition_returns_the_lead_only() {
+        let text = "Love is an emotion involving strong attraction, affection, emotional \
+                    attachment or concern. Empty love only includes commitment.";
+        assert_eq!(
+            best_passage(text, "What is love?"),
+            "Love is an emotion involving strong attraction, affection, emotional attachment or concern."
+        );
+    }
+
+    #[test]
+    fn bare_why_is_causal_not_diagnostic() {
+        assert_eq!(infer_intent("why is the sky blue"), Intent::Other);
+        assert_eq!(
+            infer_intent("why is the ssh connection refused"),
+            Intent::Diagnose
+        );
+    }
+
+    #[test]
+    fn alternate_query_needs_original_top_two_consensus() {
+        let candidate = |path: &str, rank| Candidate {
+            book: "book".into(),
+            path: path.into(),
+            title: path.into(),
+            snip: String::new(),
+            kind: Kind::Article,
+            rank,
+        };
+        let original = vec![candidate("literal", 0), candidate("cause", 1)];
+        assert_eq!(
+            consensus_candidate(&original, &[candidate("cause", 0)]).map(|c| c.path),
+            Some("cause".into())
+        );
+        assert!(consensus_candidate(&original, &[candidate("unseen", 0)]).is_none());
+    }
+
+    #[test]
+    fn title_match_rejects_cross_corpus_body_coincidence() {
+        assert!(title_matches_query("why is the sky blue", "Blue light"));
+        assert!(!title_matches_query(
+            "why is the sky blue",
+            "String methods"
+        ));
+    }
 }
 
 /// F95: the answer without the model. F79 measured this arm at 21/58 against the model's
@@ -815,6 +1071,14 @@ pub fn best_passage(text: &str, q: &str) -> String {
     if sents.is_empty() {
         return text.chars().take(400).collect();
     }
+    let q_lower = q.trim_start().to_ascii_lowercase();
+    if t.len() == 1
+        && ["what is ", "what are ", "who is "]
+            .iter()
+            .any(|lead| q_lower.starts_with(lead))
+    {
+        return sents[0].trim().to_string();
+    }
     let score = |s: &str| {
         let low = s.to_lowercase();
         let hits = t.iter().filter(|w| low.contains(w.as_str())).count() as f64;
@@ -824,14 +1088,22 @@ pub fn best_passage(text: &str, q: &str) -> String {
     // holds two decoys that mention it in someone else's sentence. `flag_anchor` already
     // knows the difference, so ask it rather than letting term density pick a cross-reference.
     let anchored = flag_anchor(text, q).and_then(|at| {
-        let head = text[at..].split_whitespace().take(4).collect::<Vec<_>>().join(" ");
+        let head = text[at..]
+            .split_whitespace()
+            .take(4)
+            .collect::<Vec<_>>()
+            .join(" ");
         sents.iter().position(|s| s.contains(&head))
     });
     let best = anchored.unwrap_or_else(|| {
         sents
             .iter()
             .enumerate()
-            .max_by(|a, b| score(a.1).partial_cmp(&score(b.1)).unwrap_or(std::cmp::Ordering::Equal))
+            .max_by(|a, b| {
+                score(a.1)
+                    .partial_cmp(&score(b.1))
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
             .map(|(i, _)| i)
             .unwrap_or(0)
     });
