@@ -1,24 +1,23 @@
 # tny
 
-A fully offline terminal search engine with a small model as the front end. No network, no
-API key, no telemetry: every answer comes from ZIM corpora on your own disk, and every answer
-cites the articles it was built from.
+A fully offline terminal search engine. No network, no API key, no telemetry: default output is
+verbatim evidence from ZIM corpora on your own disk. Optional local-model synthesis cites the
+articles it used.
 
 ```
 $ tny "how do I create a swap file"
-Use mkswap(8) to create a swap file of the size you want, activate it with `swapon`, and add
-it to /etc/fstab to keep it across reboots.
+<the best matching passage from a local ZIM, verbatim>
 
-  1 Arch Wiki · Swap   38.7s
+  1 Arch Wiki · Swap   0.3s
 ```
 
-Run it with no question for the full interface — a scrolling transcript, the shortlist of
-everything retrieved, and vim keys to drive it.
+Run it with no question for the search-first interface: ranked titles and snippets, an in-terminal
+article reader, and optional local-model synthesis.
 
 ## Install
 
-Needs `llama-server` (llama.cpp) and `kiwix-serve` (kiwix-tools) on `PATH`; tny starts and
-supervises both itself.
+Needs `kiwix-serve` (kiwix-tools) on `PATH` for default evidence mode. `llama-server` (llama.cpp)
+is needed only for `--fast` or slower synthesis modes; tny starts and supervises both when used.
 
 ```sh
 nix-shell -p llama-cpp kiwix-tools     # or: pacman -S llama.cpp kiwix-tools
@@ -27,12 +26,14 @@ cargo build --release
 ```
 
 Model weights and ZIMs live in one fixed place, `${XDG_DATA_HOME:-~/.local/share}/tny/`, so a
-question answers the same from any directory (F77). The 0.8B model downloads on first use.
+question searches the same corpus from any directory (F77). The model downloads only when a
+synthesis mode first needs it.
 
 ## Using it
 
 ```
-tny "question"          one answer, then the interface
+tny "question"          instant evidence, then the interface
+tny --fast "question"    grounded local-model synthesis
 tny --corpus search bash        find ZIMs in the kiwix library
 tny --corpus add devdocs_en_bash    download one
 tny --corpus pack mini|small|medium|large|huge     download a shelf
@@ -48,81 +49,94 @@ next time (`~/.cache/tny/prefs`).
 
 | speed | reads | typical |
 |---|---|---|
-| `--ultrafast` | best passage from the page, **no model** | 0.25 s |
-| `--fast` | one article | ~14 s |
-| `--medium` | three articles (default) | ~39 s |
+| `--ultrafast` | best passage from the page, **no model (default)** | 0.25 s |
+| `--fast` | one article, local-model synthesis | ~14 s |
+| `--medium` | three articles, local-model synthesis | ~39 s |
 | `--slow` | three articles, twice as deep | ~50 s |
 | `--molasses` | three articles, as deep as it gets | ~90 s |
 
-Those are ceilings, not costs. An answer starts at one article and two sections (~9 s of
-prefill) and only re-reads at the full budget when the grounding rules reject the first attempt
-— F82 measured that one article carries the fact for 40 of 58 questions, so most answers never
-pay for the other two.
+Default stops at verbatim evidence. `--fast` and slower modes opt into synthesis. Those are
+ceilings, not costs: generation starts with one article and two sections and only re-reads at
+the full budget when grounding rejects the first attempt (F82).
 
-`--low` / `--max` set answer length (one sentence / up to three paragraphs).
-`--model 0.8b|2b|4b|<hf repo:quant>` picks who answers. Bigger is not automatically better
-here — see `NOTES.md`.
+`--low` / `--max` set generated-answer length (one sentence / up to three paragraphs).
+`--model 0.8b|2b|4b|<hf repo:quant>` selects the synthesis model. Bigger is not automatically
+better here — see `NOTES.md`.
 
 ### Keys
 
-Modal, like vim. `i` types a question, `Esc` drives.
+Modal, like vim. `i` searches, `Esc` drives.
 
 ```
-i / a       ask                      j k ^D ^U gg G   scroll
-1-9         pick a source            ⏎                read it (skips retrieval)
-r           ask that again           + -              speed
-o           new topic                < >              length
-:model 4b   switch model             :q               quit
+i / a       search                    j k ^D ^U gg G   scroll preview/article
+J / K       previous/next result      1-9              select result
+Enter       read article in TUI       /                find in expanded article
+n / N       next/previous match       o                open article in browser
+h           toggle query highlights   + -              speed
+O           new topic                 < >              generated-answer length
+r           repeat current mode       :model 4b        switch synthesis model
+:q          quit
 ```
 
-Picking a source is the important one: the answer is built from the top articles, and when
-it lands on the wrong one, the right page is usually already on screen a keypress away.
+Fresh TUI starts in ultrafast search mode. Results stay compact; selecting one loads a passage
+from its actual article into the larger preview pane instead of trusting noisy search metadata.
+Cross-corpus body-only coincidences stay out of that visible shortlist. Matching query terms are
+highlighted by default; `h` toggles highlighting. Result navigation stops at first and last
+entry. `Enter` loads article paragraphs, headings, lists, and code while omitting navigation and
+infoboxes; `/pattern`, `n`, and `N` search it. `o` opens the original in a browser.
+Press `+`, then `r`, to generate locally from the selected source. Press `Esc` before `r` to
+synthesize from normal top-ranked results instead.
+Changing speed, answer length, or model cancels current work; an active supervised model process
+is stopped rather than allowed to finish stale output.
 
 ## How it works
 
 ```mermaid
 graph LR
-  Q[question] --> S[search 18 ZIMs<br/>per-book, parallel]
+  Q[question] --> S[search ZIMs<br/>per-book, parallel]
   S --> R[rank articles<br/>lexical, model-free]
-  R --> C[pick sections<br/>+ window on the answer]
-  C --> M[0.8B paraphrases]
+  R --> T[TUI results<br/>titles + snippets]
+  T --> V[selected article<br/>read in terminal]
+  R --> E[verbatim best passage<br/>piped CLI]
+  T --> M[optional local model]
   M --> G{grounded?}
   G -->|yes| A[answer + citations]
   G -->|no| N[not found]
 ```
 
 The model never *selects* anything — ranking, query building and section choice are
-deterministic rules, all of which beat the model when measured. It only paraphrases what it
-was handed, and a regex grounding check rejects any answer containing a flag, path or version
-that is not in the source text.
+deterministic rules, all of which beat the model when measured. In default mode no model runs:
+tny prints source text. In synthesis modes the model only paraphrases what it was handed, and a
+regex grounding check rejects any answer containing a flag, path or version that is not in the
+source text.
 
 ## Where it stands
 
-4,266 lines of Rust, 36 commits, 110 findings. Every number below comes from `bench/`, and
-each guard pins its own configuration (F105) so a run is reproducible.
+Measurements below come from `bench/`; each guard pins its configuration (F105).
 
 | what it measures | command | current |
 |---|---|---|
-| grounding rules (no servers, no network) | `cargo test` | **16/16** |
-| is the right article retrieved | `bun bench/rank-cli.mjs` | rank-1 **34/58**, in shortlist **48/58** |
+| deterministic rules and UI helpers (no servers, no network) | `cargo test` | **29/29** |
+| is the right article retrieved | `bun bench/rank-cli.mjs` | rank-1 **37/58**, in shortlist **51/58** |
+| cross-domain retrieval, frozen before first run | `bun bench/cross-domain-cli.mjs` | rank-1 **25/40**, top-8 **34/40** |
 | is the fact in the context handed to the model | `bun bench/ctx-cli.mjs` | 48/58 — **stale, F109 changed the context** |
 | is the answer right, end to end | `bun bench/answer-cli.mjs --regrade` | **35/58** correct, 4 refused, **19 wrong** |
-| retrieval on questions nobody here wrote | `bun bench/holdout-cli.mjs` | rank-1, 81 pages — **unrun since F110 rewrote it** |
+| title-path holdout | `bun bench/holdout-cli.mjs` | installed subset **22/41** rank-1, **26/41** shortlist |
 
-Corpus behind those numbers: 18 ZIMs, 5.5 GB — Wikipedia, Stack Exchange, Arch Wiki, DevDocs,
-man pages. Hardware: 4-core 2015 laptop, no GPU, 8 GB RAM.
+The 58-case results use the documented 18-ZIM corpus. F116's newer cross-domain run used the
+currently installed 11-ZIM corpus. Both are CPU-only.
 
 ### What is honestly weak
 
-- **It is slow.** 39 s for a default answer here, two thirds of it prefill. `--ultrafast`
-  (0.3 s, no model) exists because sometimes the passage is all you wanted.
-- **19 of 58 answers are confidently wrong**, and that is the number that matters for a tool
-  that prints shell commands. It more than doubled when man pages joined the corpus (F92):
+- **Default is fast and safe.** Ultrafast mode returns verbatim evidence in about 0.3 s here and
+  never invents commands. Synthesis modes remain 14–90 s on CPU.
+- **19 of 58 generated answers are confidently wrong**, and that is the number that matters for
+  a tool that prints shell commands. It more than doubled when man pages joined the corpus (F92):
   refusals fell 8 → 4 and wrong answers rose 8 → 19. A refusal is the *designed* failure — the
   grounding check rejects any answer whose commands or paths are not in the source — and the
   corpus change traded the safe failure for the dangerous one.
-- **35/58 is the honest end-to-end number** (F108: the graders were audited case by case and
-  three of them were passing answers that name no runnable command). The gap is mostly
+- **35/58 is the honest generated-answer number** (F108: the graders were audited case by case
+  and three of them were passing answers that name no runnable command). The gap is mostly
   *selection*: in 43 of 58 cases the answer is already a single sentence in the retrieved text
   (F79), and no selector tried — lexical, bi-encoder, two cross-encoders — picked it better
   than the model does.
@@ -137,7 +151,7 @@ man pages. Hardware: 4-core 2015 laptop, no GPU, 8 GB RAM.
 
 ## The measurements
 
-- **`NOTES.md`** — 107 findings, each with the numbers behind it. Read this first; where the
+- **`NOTES.md`** — 108 findings, each with the numbers behind it. Read this first; where the
   three documents disagree, it wins.
 - **`PLAN.md`** — the design and the reasoning. Every decision cites a finding.
 - **`bench/`** — the guards in the table above, plus `harness.mjs` for the pre-Rust work.
